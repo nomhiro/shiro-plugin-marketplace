@@ -1,0 +1,182 @@
+# CLAUDE.md
+
+このファイルは Claude Code (claude.ai/code) がこのリポジトリで作業するときのガイドです。
+
+## プロジェクト概要
+
+**{{CERT_ID}}「{{CERT_NAME}}」** 試験対策の Udemy 演習テスト講座を作成・管理するプロジェクトです。
+
+- **試験番号:** {{CERT_ID}}
+- **正式名称:** {{CERT_NAME}}
+- **合格スコア:** {{PASS_SCORE}} 点以上
+- **試験時間:** {{EXAM_MINUTES}} 分
+- **学習ガイド:** {{STUDY_GUIDE_URL}}
+
+試験の詳細な仕様（ドメイン配分・出題言語・情報源）は **`sections.md` の front matter が Source of Truth** です。ここには再掲しません。
+
+## 構造方針
+
+**mock-exam（{{MOCK_EXAMS}}本フル模試・各{{QUESTIONS_PER_EXAM}}問・重複なし）**
+
+- 各本はドメイン横断の混合構成（front matter の `domains` の配分どおりに混在）
+- {{MOCK_EXAMS}}本すべて本番相当の難易度で統一（parallel forms）
+- 出題言語は front matter の `exam.language` に従う
+
+## 試験のスキル領域（ドメイン）
+
+**`sections.md` の front matter `domains` が Source of Truth。** 配分表は `sections.md`「配分表」節を参照してください。重複管理のためここには再掲しません。
+
+各ドメインの詳細なタスクステートメント／サブトピック（試験ブループリント）は `sections.md`「試験ブループリント」節が Source of Truth です。
+
+## 一次情報源
+
+**`sections.md` の front matter `primary_sources` が Source of Truth。** `priority` の昇順に使います。ベンダー別の具体的な調査レシピは `udemy-exam-prep` プラグインの `research-cert-docs` スキルが持っています。
+
+二次情報（個人ブログ・受験記・まとめ記事）は **難易度の校正にのみ使い、問題の出典には使いません。**
+
+## ディレクトリ構成
+
+```
+{{CERT_ID}}/
+├── CLAUDE.md                                       # このファイル
+├── sections.md                                     # 試験ブループリント＋配分表＋セクション一覧（front matter が Source of Truth）
+├── question-bank.md                                # {{MOCK_EXAMS}}本横断の出題済みインデックス（重複管理）
+├── removed-questions.md                            # 検証で退避された問題
+├── udemy-course-meta.md                            # Udemy コース設定（create-udemy-course が起草）
+├── PracticeTestBulkQuestionUploadTemplate_v2.csv  # Udemy 一括アップロード形式（参考）
+├── research/                                       # 全シラバス共有 digest（Phase 1a で生成）
+│   └── *.md                                        # 技術領域別の調査結果（事実リスト＋出典URL）
+└── section0N-mock-exam-N/                          # フル模試1本分
+    ├── quiz.csv                                    # {{QUESTIONS_PER_EXAM}}問
+    └── sources.md                                  # 参照ドキュメントと問題の対応表
+```
+
+> **harness はこのリポジトリに入っていません。** スキル7個・サブエージェント3個・検証スクリプト5本は
+> `udemy-exam-prep` プラグインが提供します。`/plugin install udemy-exam-prep@shiro-plugin-marketplace` で導入してください。
+
+## ハーネス設計の意図
+
+このプロジェクトは **「資格固有コンテンツ（payload）」と「ワークフロー実装（harness）」が分離** されています。
+
+- **payload（このリポジトリ）:** `CLAUDE.md`, `sections.md`, `question-bank.md`, `removed-questions.md`, `research/`, `section0N-mock-exam-N/`, `udemy-course-meta.md`
+- **harness（`udemy-exam-prep` プラグイン）:** スキル・サブエージェント・検証スクリプト
+
+harness は資格非依存です。資格固有の情報は **`sections.md` の front matter だけ** が持ち、スキルとエージェントはそこから読みます。これにより、同じ harness を他の資格プロジェクトへそのまま展開できます。
+
+## ワークフロー全体図
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 0: プロジェクト初期化                                   │
+│ /udemy-exam-prep:init-exam-course {{CERT_ID}}                │
+│   └─ テンプレート展開（このファイルもその成果物）             │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 0.5: 試験ブループリント定義                             │
+│ /udemy-exam-prep:create-sections {{CERT_ID}}                 │
+│   ├─ 学習ガイド Fetch                                         │
+│   ├─ ドメイン×タスクステートメント抽出                        │
+│   └─ sections.md 起草（front matter の domains を確定）       │
+│         ★ R1: sections.md レビュー ★                         │
+│         （ドメイン・配分・網羅性・front matter 検証5項目）     │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 1a: 全シラバス共有調査（1回限り）                       │
+│   doc-researcher 並列起動                                     │
+│   → research/ に共有 digest を保存（{{MOCK_EXAMS}}本で再利用） │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 1b: フル模試生成（/create-section 1〜{{MOCK_EXAMS}}）   │
+│ /udemy-exam-prep:create-section N                            │
+│   ├─ front matter から配分ノルマ取得                          │
+│   ├─ 共有 digest 参照（再調査なし）                            │
+│   ├─ question-author 起動（ノルマ＋question-bank 渡し）        │
+│   │     ★ R2: サンプルレビュー（初回のみ） ★                  │
+│   ├─ question-author 残り生成                                 │
+│   ├─ exam-validator（配分/シラバス外/重複検証）                │
+│   ├─ 選択肢シャッフル（決定的 seed=42）                       │
+│   └─ sources.md 出力                                          │
+│         ★ R3: section 全体レビュー ★                         │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 2: Udemy コース構築                                    │
+│ /udemy-exam-prep:create-udemy-course                         │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 3: Udemy へのアップロード                              │
+│ /udemy-exam-prep:upload-practice-tests                       │
+│   ├─ CSV 事前検証                                             │
+│   │     ★ R4: CSV検証FAIL レビュー（FAIL時のみ） ★           │
+│   └─ 各セクションのテスト追加                                 │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Phase 4: コース公開 — 手動                                   │
+│   審査提出・公開ボタンは人が押す（自動化対象外）              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## エントリーポイント（オーケストレータスキル）
+
+スラッシュ起動と自然言語起動の両方に対応します。
+
+| Phase | スキル | 起動例 | 目的 |
+|-------|--------|--------|------|
+| 0 | `init-exam-course` | `/udemy-exam-prep:init-exam-course {{CERT_ID}}` | テンプレートを展開してプロジェクトを初期化。既存ファイルは上書きしない |
+| 0.5 | `create-sections` | `/udemy-exam-prep:create-sections {{CERT_ID}}` | 学習ガイドから sections.md を起草。**R1 レビュー断面で停止** |
+| 1 | `create-section` | `/udemy-exam-prep:create-section 2` | フル模試1本分を生成。**R2（初回）・R3 レビュー断面** |
+| 2 | `create-udemy-course` | `/udemy-exam-prep:create-udemy-course` | Udemy にコース作成と基本設定 |
+| 3 | `upload-practice-tests` | `/udemy-exam-prep:upload-practice-tests` | 各セクションの quiz.csv を Udemy に反映。**R4 レビュー断面（FAIL時のみ）** |
+
+## レビュー断面の役割
+
+| 断面 | タイミング | 何を確認するか | 修正の波及範囲 |
+|------|----------|--------------|--------------|
+| **R1** | sections.md 起草後 | ドメインと配分が学習ガイド準拠か・タスクステートメント網羅性・front matter 検証5項目 | 全セクション（最上流） |
+| **R2** | 最初の3-5問生成後（初回のみ） | 解説スタイル・難易度・出典の質・不正解選択肢の作り | 該当セクション全問 |
+| **R3** | create-section パイプライン完了時 | ドメイン配分・シラバス外・重複・正解位置分布・問題品質 | 該当セクション or 隣接セクション |
+| **R4** | CSV 事前検証で FAIL あり時 | 自動修正の妥当性 | 該当 CSV のみ |
+
+**R1 と R2 は最上流**で品質をロックする要。最終 R3 のやり直しコストを下げます。
+
+## クイズ作成ガイドライン（要点）
+
+詳細は各スキルファイル参照。要点のみ:
+
+1. **公式ドキュメント準拠** — 全問題が `primary_sources` の取得情報に基づくこと（推測禁止）。出典 URL 必須
+2. **目標問題数** — 1セクション（1本のフル模試） {{QUESTIONS_PER_EXAM}}問 固定
+3. **ドメイン配分ノルマ** — `sections.md` front matter の `domains[].per_exam` に従う。exam-validator が自動検証
+4. **問題タイプ比率** — front matter の `question_types` に従う
+5. **シナリオ問題を混ぜる** — 単純な知識問題だけでなく「XXX の場合に何をすべきか」というシナリオ問題を front matter の `scenario_ratio_min` 以上
+6. **解説は教材レベル** — 否定文で終わらせず、不正解の選択肢も「何を意味するか」を説明する
+7. **{{MOCK_EXAMS}}本横断で重複禁止** — 同一 (task_statement, tested_concept) の再出題は `max_per_concept`（既定2）まで。`question-bank.md` で管理
+8. **CSV 形式厳守** — 17 カラム、BOM 無し、multi-select は正解 2 個以上かつ誤答を1つ以上（`quiz-csv-format` 参照）
+9. **用語表記ルール** — 製品名・サービス名・API 名・フラグ名・パラメータ名は**原語のまま**書く（カタカナ化しない）。日本語に定着した超頻出語（プロンプト・モデル・トークン・ワークフロー・パイプライン）はカタカナ可。漢字の一般語（検索・要約・監視・評価・翻訳・取得）は日本語のまま
+
+## 継続性の設計
+
+**試験内容が更新されたとき:**
+1. 学習ガイド（{{STUDY_GUIDE_URL}}）を確認し変更点を特定
+2. `sections.md` の front matter と ブループリントを更新
+3. 影響セクションの `sources.md` で URL の有効性確認
+4. 影響する模試本の `/udemy-exam-prep:create-section N` を再実行
+
+**Source of Truth:**
+- `sections.md` — 試験プロファイル（front matter）＋ブループリント＋配分表＋セクション一覧
+- `question-bank.md` — {{MOCK_EXAMS}}本横断の出題済みインデックス（重複管理）
+- `sources.md`（各セクション）— 問題と出典の対応表
+- `removed-questions.md` — 検証で退避された問題（再利用候補）
+- `CLAUDE.md` — プロジェクト方針
+
+## 技術的注意事項
+
+- **大量の CSV を書く** ときは Bash heredoc ではなく Python スクリプトを使う（クォートエスケープ事故が起きやすい）。書き出しはプラグインの `scripts/validate_quiz_csv.py` の `write_rows` を使う
+- **CSV エンコーディング** は `utf-8` で BOM 無し（`encoding='utf-8'` で書き、`utf-8-sig` で読む）。Udemy は BOM があるとヘッダー不正と判定する
+- **MCP ツール名は環境依存** — `plugin_` プレフィックスが付く場合と付かない場合がある。スキル本文では機能名で言及する
+- **Playwright MCP はアクセシビリティツリー駆動** — CSS セレクタではなく `browser_snapshot` 由来の ref / role / name で操作
+- **検証は必ずスクリプトで行う** — 目視確認で済ませない。`profile.py` / `validate_quiz_csv.py` / `validate_exam.py` / `shuffle_options.py` を通す
