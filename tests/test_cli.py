@@ -186,7 +186,8 @@ def run_with_encoding(script, *args, encoding="cp932"):
 def test_every_cli_starts_on_a_cp932_console():
     """日本語 Windows の既定コンソール（cp932）で起動時に落ちないこと。"""
     for script in ("profile.py", "init_course.py", "validate_quiz_csv.py",
-                   "normalize_urls.py", "shuffle_options.py", "validate_exam.py"):
+                   "normalize_urls.py", "shuffle_options.py", "validate_exam.py",
+                   "check_option_balance.py"):
         proc = run_with_encoding(script)
         combined = proc.stdout + proc.stderr
         assert "UnicodeEncodeError" not in combined, f"{script} が cp932 で落ちる: {combined}"

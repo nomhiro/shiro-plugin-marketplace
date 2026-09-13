@@ -31,7 +31,7 @@ Phase 1b   /udemy-exam-prep:create-section N   （1 〜 mock_exams を順に）
              → question-author でサンプル生成
              ★ R2: 解説スタイル・難易度・distractor の質（初回のみ）★
              → 残りを生成 → exam-validator で配分/シラバス外/重複検証
-             → 出典URL正規化 → 選択肢シャッフル（最良シード自動走査）
+             → 長さバイアス検出 → 出典URL正規化 → 選択肢シャッフル（最良シード自動走査）
              ★ R3: セクション全体レビュー ★
              ↓
 Phase 2    /udemy-exam-prep:create-udemy-course
@@ -143,6 +143,9 @@ python scripts/init_course.py --dest . --cert CCA-F \
 # 17カラム CSV の検証（BOM/正解数/範囲/distractor/ペア/必須列）
 python scripts/validate_quiz_csv.py section0*/quiz.csv
 
+# 正解肢の長さバイアス検出（品質ゲート。シャッフル前に通す）
+python scripts/check_option_balance.py section0*/quiz.csv
+
 # 出典 URL のロケール正規化（冪等）
 python scripts/normalize_urls.py section0*/quiz.csv
 
@@ -165,6 +168,8 @@ CSV の読み書きは `scripts/validate_quiz_csv.py` の `read_rows` / `write_r
 **シャッフルは最良シード自動走査。** 単一固定シードは当たり外れが大きく、実績として seed=42 が正解を1位置に 78.8% 偏らせました。原本 `quiz.raw.csv` を一度だけ退避して常に原本からシャッフルし（再シャッフルの罠の防止）、シードを走査して正解位置が最も均等になるものを採用します。
 
 **期待票数は「その位置を提供した問題」からのみ積む。** 4択中心に5/6択が混在しても、位置5・6が誤検知になりません。
+
+**長さバイアスはシャッフルでは消えない。** LLM は正解肢に根拠や仕組みの説明を書き込むため、正解が一貫して最長になります（実績: 90問で 78% が正解＝最長、期待値25%）。受講者が内容を読まずに「最長を選ぶ」だけで正解できてしまう攻略可能な欠陥で、位置を変えても長さは付いてくるのでシャッフルでは解消できません。`check_option_balance.py` を**内容修正が可能なシャッフル前**の品質ゲートとして通します。
 
 **URL 正規化はホスト別の許可リスト方式。** ロケールがホスト直後の第1パスセグメントにあるサイト（`docs.claude.com/en/docs/...`）だけを書き換え、ロケールが下位にあるサイト（`code.claude.com/docs/en/...`）と未知のホストは一切触りません。前者の規則を後者に当てると `code.claude.com/en/docs/en/...` と URL を壊すためです。
 
