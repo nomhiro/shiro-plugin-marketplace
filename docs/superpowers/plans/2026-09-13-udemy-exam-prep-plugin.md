@@ -1752,12 +1752,12 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `python -m pytest tests/test_validate_exam.py -v`
-Expected: PASS（13 passed）
+Expected: PASS（12 passed）
 
 - [ ] **Step 5: Run the whole suite and commit**
 
 Run: `python -m pytest -v`
-Expected: PASS（合計 62 passed）
+Expected: PASS（合計 61 passed）
 
 ```bash
 git add plugins/udemy-exam-prep/scripts/validate_exam.py tests/test_validate_exam.py
@@ -2094,7 +2094,7 @@ git commit -m "feat: エージェント3個を移植・汎用化し検証をス�
 - [ ] **Step 1: 全テストを通す**
 
 Run: `python -m pytest -v`
-Expected: PASS（合計 76 passed）
+Expected: PASS（合計 75 passed）
 
 - [ ] **Step 2: プラグイン README を書く**
 
@@ -2210,4 +2210,4 @@ Expected: `"visibility": "PUBLIC"` と URL が表示される
 - `scripts.profile` の `load_profile` / `validate_profile` / `domain_quota` / `domain_names` を Task 3・6 が同名で使用 — 一致
 - `scripts.init_course` の `PLACEHOLDERS` / `render` / `init_course` / `InitError` — Task 3 内で一致
 - `scripts.validate_exam` の `BANK_FIELDS` 7項目が `question-bank.md.tmpl` の表ヘッダー（section / q# / domain / task_statement / tested_concept / scenario / 問題文冒頭60字）と同数・同順 — 一致
-- pytest の合計件数: Task 1 の 4 + Task 2 の 11 + Task 3 の 9 + Task 4 の 15 + Task 5 の 10 + Task 6 の 13 = 62（Task 6 Step 5）、+ Task 7 の 7 + Task 8 の 7 = 76（Task 9 Step 1）— 一致
+- pytest の合計件数: Task 1 の 4 + Task 2 の 11 + Task 3 の 9 + Task 4 の 15 + Task 5 の 10 + Task 6 の 12 = 61（Task 6 Step 5）、+ Task 7 の 7 + Task 8 の 7 = 75（Task 9 Step 1）— 一致
