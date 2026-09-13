@@ -11,6 +11,14 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from pathlib import Path
+
+# 直接実行（python .../scripts/x.py）でも兄弟モジュールを解決できるようにする。
+# pytest からは scripts パッケージとして import されるため、その場合は何もしない。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts.validate_quiz_csv import read_rows, write_rows
 
 # host -> 強制するロケールセグメント（None はロケールを持たないサイト = 変更しない）
 LOCALE_RULES: dict[str, str | None] = {
@@ -69,8 +77,6 @@ def normalize_rows(rows: list[list[str]]) -> tuple[list[list[str]], int]:
 
 
 def normalize_file(path) -> int:
-    from scripts.validate_quiz_csv import read_rows, write_rows
-
     rows = read_rows(path)
     fixed, n = normalize_rows(rows)
     if n:

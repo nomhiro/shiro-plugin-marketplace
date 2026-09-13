@@ -1757,7 +1757,7 @@ Expected: PASS（12 passed）
 - [ ] **Step 5: Run the whole suite and commit**
 
 Run: `python -m pytest -v`
-Expected: PASS（合計 69 passed）
+Expected: PASS（合計 79 passed（URL正規化 10 本を追加））
 
 ```bash
 git add plugins/udemy-exam-prep/scripts/validate_exam.py tests/test_validate_exam.py
@@ -2094,7 +2094,7 @@ git commit -m "feat: エージェント3個を移植・汎用化し検証をス�
 - [ ] **Step 1: 全テストを通す**
 
 Run: `python -m pytest -v`
-Expected: PASS（合計 83 passed）
+Expected: PASS（合計 113 passed（スキル12 / エージェント14 / CLI 8 を追加））
 
 - [ ] **Step 2: プラグイン README を書く**
 

@@ -21,6 +21,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+# 直接実行（python .../scripts/x.py）でも兄弟モジュールを解決できるようにする。
+# pytest からは scripts パッケージとして import されるため、その場合は何もしない。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from scripts.validate_quiz_csv import (
     OPTION_PAIRS, correct_indices, read_rows, write_rows,
 )
