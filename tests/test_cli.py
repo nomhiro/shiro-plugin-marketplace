@@ -171,3 +171,63 @@ def test_the_whole_pipeline_runs_in_order(project):
     for script, args in steps:
         proc = run(script, *args)
         assert proc.returncode == 0, f"{script} failed:\n{proc.stdout}{proc.stderr}"
+
+
+def run_with_encoding(script, *args, encoding="cp932"):
+    """コンソールのエンコーディングを指定して直接実行する。"""
+    import os
+    env = dict(os.environ, PYTHONIOENCODING=encoding)
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / script), *[str(a) for a in args]],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+
+
+def test_every_cli_starts_on_a_cp932_console():
+    """日本語 Windows の既定コンソール（cp932）で起動時に落ちないこと。"""
+    for script in ("profile.py", "init_course.py", "validate_quiz_csv.py",
+                   "normalize_urls.py", "shuffle_options.py", "validate_exam.py"):
+        proc = run_with_encoding(script)
+        combined = proc.stdout + proc.stderr
+        assert "UnicodeEncodeError" not in combined, f"{script} が cp932 で落ちる: {combined}"
+        assert "Traceback" not in combined, f"{script} が traceback を出した: {combined}"
+
+
+def test_validation_failures_print_on_a_cp932_console(tmp_path):
+    """違反を報告する瞬間に落ちないこと。
+
+    検証スクリプトは FAIL 時に大量の文字を印字する。ここで UnicodeEncodeError に
+    なると診断が一切得られない（実際に em dash U+2014 で発生した）。
+    """
+    p = tmp_path / "quiz.csv"
+    row = ["Q", "multi-select"]
+    for k in range(6):
+        row += (["opt", "exp"] if k < 4 else ["", ""])
+    row += ["1", "overall", "Domain"]          # multi-select なのに正解1個 -> FAIL
+    write_rows(p, [list(HEADER), row])
+
+    proc = run_with_encoding("validate_quiz_csv.py", p)
+    combined = proc.stdout + proc.stderr
+    assert proc.returncode == 1, combined
+    assert "UnicodeEncodeError" not in combined
+    assert "Traceback" not in combined
+    assert "multi-select" in proc.stdout       # 診断が実際に出ている
+
+
+def test_no_script_message_uses_characters_cp932_cannot_encode():
+    """出力文字列に cp932 で表現できない文字を入れない（根本の予防）。"""
+    offenders = {}
+    for script in sorted(SCRIPTS.glob("*.py")):
+        if script.name == "_console.py":       # 説明のため意図的に U+2014 を含む
+            continue
+        text = script.read_text(encoding="utf-8")
+        bad = set()
+        for ch in set(text):
+            if ord(ch) > 127:
+                try:
+                    ch.encode("cp932")
+                except UnicodeEncodeError:
+                    bad.add("U+%04X" % ord(ch))
+        if bad:
+            offenders[script.name] = sorted(bad)
+    assert not offenders, f"cp932 で印字できない文字がある: {offenders}"

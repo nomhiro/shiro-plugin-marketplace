@@ -9,6 +9,13 @@ import csv
 import sys
 from pathlib import Path
 
+# 直接実行（python .../scripts/x.py）でも兄弟モジュールを解決できるようにする。
+# pytest からは scripts パッケージとして import されるため、その場合は何もしない。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts._console import safe_stdout
+
 HEADER = (
     "Question", "Question Type",
     "Answer Option 1", "Explanation 1",
@@ -49,7 +56,7 @@ def validate_csv(path) -> list[str]:
 
     with open(path, "rb") as f:
         if f.read(3) == b"\xef\xbb\xbf":
-            errors.append("BOM detected at file head — remove it")
+            errors.append("BOM detected at file head - remove it")
 
     rows = read_rows(path)
     if len(rows) < 2:
@@ -78,23 +85,23 @@ def validate_csv(path) -> list[str]:
         if qt == "multiple-choice" and len(correct) != 1:
             errors.append(
                 f"Row {i}: multiple-choice with {len(correct)} correct answers "
-                "— must be exactly 1"
+                "- must be exactly 1"
             )
         if qt == "multi-select" and len(correct) < 2:
             errors.append(
                 f"Row {i}: multi-select with {len(correct)} correct answer(s) "
-                "— must be >=2 or change to multiple-choice"
+                "- must be >=2 or change to multiple-choice"
             )
         if qt == "multi-select" and correct and len(correct) >= nopt:
             errors.append(
-                f"Row {i}: multi-select with no distractor — {len(correct)} correct "
+                f"Row {i}: multi-select with no distractor - {len(correct)} correct "
                 f"of {nopt} options (need at least 1 incorrect)"
             )
         for c in correct:
             if not c.isdigit() or not (1 <= int(c) <= nopt):
                 errors.append(
                     f'Row {i}: correct answer "{c}" out of range '
-                    f"— only {nopt} option(s) present"
+                    f"- only {nopt} option(s) present"
                 )
 
         for col in REQUIRED_COLS:
@@ -112,6 +119,7 @@ def validate_csv(path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     if len(argv) < 2:
         print("usage: validate_quiz_csv.py <quiz.csv> [...]", file=sys.stderr)
         return 2

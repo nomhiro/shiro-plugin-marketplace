@@ -9,6 +9,13 @@ from pathlib import Path
 
 import yaml
 
+# 直接実行（python .../scripts/x.py）でも兄弟モジュールを解決できるようにする。
+# pytest からは scripts パッケージとして import されるため、その場合は何もしない。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts._console import safe_stdout
+
 VENDORS = ("anthropic", "microsoft", "github", "cloudflare", "ipa", "generic")
 MODES = ("mock-exam",)
 
@@ -114,6 +121,7 @@ def domain_names(profile: dict) -> dict[str, str]:
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     if len(argv) != 2:
         print("usage: profile.py <sections.md>", file=sys.stderr)
         return 2

@@ -10,6 +10,13 @@ import shutil
 import sys
 from pathlib import Path
 
+# 直接実行（python .../scripts/x.py）でも兄弟モジュールを解決できるようにする。
+# pytest からは scripts パッケージとして import されるため、その場合は何もしない。
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts._console import safe_stdout
+
 PLACEHOLDERS = (
     "CERT_ID",
     "CERT_NAME",
@@ -83,6 +90,7 @@ def init_course(
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     ap = argparse.ArgumentParser(description="試験対策講座プロジェクトを初期化する")
     ap.add_argument("--dest", required=True)
     ap.add_argument("--cert", required=True, help="試験番号 (例: CCA-F)")

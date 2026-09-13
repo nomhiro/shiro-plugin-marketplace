@@ -26,6 +26,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts._console import safe_stdout
 from scripts.validate_quiz_csv import (
     OPTION_PAIRS, correct_indices, read_rows, write_rows,
 )
@@ -135,7 +136,7 @@ def balance_warnings(rows: list[list[str]]) -> list[str]:
                 warnings.append(
                     f"{qtype} position {entry['position']}: "
                     f"actual {entry['actual']} vs expected {entry['expected']} "
-                    "— outside tolerance"
+                    "- outside tolerance"
                 )
     return warnings
 
@@ -198,6 +199,7 @@ def shuffle_file(
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     ap = argparse.ArgumentParser(
         description="quiz.csv の選択肢をシャッフルし正解位置を均等化する"
     )

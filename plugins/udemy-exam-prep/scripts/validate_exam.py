@@ -16,6 +16,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.profile import domain_names, domain_quota, load_profile
+from scripts._console import safe_stdout
 from scripts.validate_quiz_csv import read_rows
 
 BANK_FIELDS = (
@@ -41,7 +42,7 @@ def check_quota(rows: list[list[str]], profile: dict) -> list[str]:
     for name in counts:
         if name not in name_to_id:
             errors.append(
-                f'unknown Domain value "{name}" — must be one of {sorted(name_to_id)}'
+                f'unknown Domain value "{name}" - must be one of {sorted(name_to_id)}'
             )
     for did, want in quota.items():
         got = counts.get(names[did], 0)
@@ -97,7 +98,7 @@ def check_duplicates(entries: list[dict], max_per_concept: int = 2) -> list[str]
             if n > 1:
                 errors.append(
                     f"{label} reused in the same scenario {scenario} {n} times "
-                    "— vary the scenario when reusing a concept"
+                    "- vary the scenario when reusing a concept"
                 )
     return errors
 
@@ -110,6 +111,7 @@ def bank_rows(entries: list[dict]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     ap = argparse.ArgumentParser(description="フル模試の配分・整合・重複を検証する")
     ap.add_argument("--sections", required=True)
     ap.add_argument("--bank")

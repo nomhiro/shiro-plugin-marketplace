@@ -18,6 +18,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts._console import safe_stdout
 from scripts.validate_quiz_csv import read_rows, write_rows
 
 # host -> 強制するロケールセグメント
@@ -96,6 +97,7 @@ def normalize_file(path) -> int:
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     ap = argparse.ArgumentParser(
         description="quiz.csv の出典 URL のロケールを正規化する（冪等）"
     )
