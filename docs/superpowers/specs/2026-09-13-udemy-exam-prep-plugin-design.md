@@ -31,7 +31,7 @@ Udemy の試験対策演習テスト講座は現在、試験ごとのプロジ�
 | リポジトリ公開範囲 | **Public** | harness に問題本文（payload）を含まないため機密性の問題がない。`/plugin marketplace add nomhiro/shiro-plugin-marketplace` だけで追加でき、他マシンへの展開も容易 |
 | プラグイン粒度 | **単一プラグイン `udemy-exam-prep`** | `create-section` → `question-author` → `quiz-csv-format` の依存が密結合で、分割の実利が薄い |
 | テンプレート配置 | **プラグイン内 `templates/exam-course/` + `init-exam-course` スキル** | プラグイン更新でテンプレートも自動追従。手動コピーとプレースホルダ手置換が不要 |
-| 対応資格スコープ | **汎用（任意ベンダー）** | 情報源をプロジェクト側 front matter で宣言。Microsoft / GitHub / Cloudflare / IPA / generic のレシピをプラグインが保持 |
+| 対応資格スコープ | **汎用（任意ベンダー）** | 情報源をプロジェクト側 front matter で宣言。Anthropic / Microsoft / GitHub / Cloudflare / IPA / generic のレシピをプラグインが保持 |
 | セクション構成モード | **mock-exam のみ** | AI-103 で確立した最新世代に絞る。ドメイン配分ノルマ・`question-bank` 重複管理が全てこのモード前提 |
 | 試験プロファイルの宣言場所 | **`sections.md` の front matter** | 既にメタデータ行（`> mode:` `> Source of Truth:` `> 試験概要:`）を持ち、スキルが読んでいるファイル。新規ファイルを増やさない |
 | AI-103 の既存 `.claude/` | **併存（削除しない）** | プロジェクトローカルがプラグインより優先されるため挙動不変。新規講座で実動作を検証してから削除を判断 |
@@ -208,7 +208,7 @@ domains:
 | `cert` | ✓ | string | 試験番号。ディレクトリ名・コースタイトルに使用 | 全スキル |
 | `cert_name` | ✓ | string | 正式名称（原語） | `create-udemy-course` |
 | `cert_name_ja` | | string | 日本語名称。無い場合は `cert_name` を使う | `create-udemy-course` |
-| `vendor` | ✓ | enum | `microsoft` / `github` / `cloudflare` / `ipa` / `generic` | `research-cert-docs` / `doc-researcher` |
+| `vendor` | ✓ | enum | `anthropic` / `microsoft` / `github` / `cloudflare` / `ipa` / `generic` | `research-cert-docs` / `doc-researcher` |
 | `credential_url` | | url | 認定資格ページ | `create-udemy-course` |
 | `study_guide` | ✓ | url | 学習ガイド。ブループリント抽出元 | `create-sections` |
 | `mode` | ✓ | enum | 現状 `mock-exam` のみ。他値はエラー | `create-section` / `exam-validator` |
