@@ -46,6 +46,10 @@ def write_rows(path, rows: list[list[str]]) -> None:
         csv.writer(f, quoting=csv.QUOTE_MINIMAL).writerows(rows)
 
 
+# セル内改行の検出用（バックスラッシュ表記を避けて chr で定義）
+NEWLINE_CHARS = (chr(10), chr(13))
+
+
 def correct_indices(cell: str) -> list[str]:
     return [c.strip() for c in cell.split(",") if c.strip()]
 
@@ -78,6 +82,17 @@ def validate_csv(path) -> list[str]:
         qt = row[1].strip()
         if qt not in QUESTION_TYPES:
             errors.append(f'Row {i}: invalid Question Type "{qt}"')
+
+        # セル内改行は Udemy の一括取り込みでの破損要因。csv としては正しく
+        # 引用されるので他の検査は通ってしまうため、ここで明示的に落とす。
+        # （実績: CCA-F の2・3本目の Overall Explanation に段落区切りが入り、
+        #  4本は単一行という非対称が生まれた）
+        for ci, cell in enumerate(row, 1):
+            if any(ch in cell for ch in NEWLINE_CHARS):
+                errors.append(
+                    f"Row {i} col {ci} ({HEADER[ci - 1]}): contains an in-cell "
+                    "newline - write the cell on one line"
+                )
 
         nopt = sum(1 for opt, _ in OPTION_PAIRS if row[opt].strip())
         correct = correct_indices(row[14])

@@ -113,3 +113,26 @@ def test_option_without_explanation_is_reported(tmp_path):
     row[10] = "Option E"  # 選択肢だけ埋めて解説を空にする
     errs = validate_csv(build(tmp_path, [row]))
     assert any("option/explanation pair" in e for e in errs)
+
+
+def test_in_cell_newline_is_an_error(tmp_path):
+    """セル内改行は Udemy の一括取り込みでの破損要因なので落とす。
+
+    csv としては正しく引用されるため、列数・ヘッダー・正解番号の検査は
+    すべて通ってしまう。それでも落ちることを確認する。
+    """
+    r = base_row()
+    r[15] = "1行目" + chr(10) + chr(10) + "2行目"
+    errors = validate_csv(build(tmp_path, [r]))
+    assert any("in-cell newline" in e for e in errors)
+    assert any("Overall Explanation" in e for e in errors)
+
+
+def test_carriage_return_in_cell_is_an_error(tmp_path):
+    r = base_row()
+    r[0] = "Question" + chr(13) + "continued"
+    assert any("in-cell newline" in e for e in validate_csv(build(tmp_path, [r])))
+
+
+def test_single_line_cells_pass(tmp_path):
+    assert validate_csv(build(tmp_path, [base_row()])) == []
