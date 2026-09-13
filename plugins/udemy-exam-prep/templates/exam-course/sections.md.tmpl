@@ -1,0 +1,40 @@
+---
+cert: {{CERT_ID}}
+cert_name: {{CERT_NAME}}
+vendor: {{VENDOR}}
+study_guide: {{STUDY_GUIDE_URL}}
+mode: mock-exam
+exam:
+  minutes: {{EXAM_MINUTES}}
+  pass_score: {{PASS_SCORE}}
+  max_score: 1000
+  language: ja
+mock_exams: {{MOCK_EXAMS}}
+questions_per_exam: {{QUESTIONS_PER_EXAM}}
+question_types:
+  multiple-choice: "60-70%"
+  multi-select: "30-40%"
+scenario_ratio_min: "30%"
+primary_sources: []
+# domains は /udemy-exam-prep:create-sections が学習ガイドから確定させる。
+# 形式: - {id: D1, name: ..., ratio: "27%", per_exam: 16}
+---
+
+# {{CERT_ID}} 演習テスト目次
+
+> Source of Truth / 学習ガイド: {{STUDY_GUIDE_URL}}
+> 試験概要: {{EXAM_MINUTES}}分 / 合格{{PASS_SCORE}} / フル模試{{MOCK_EXAMS}}本 x {{QUESTIONS_PER_EXAM}}問
+
+## 試験ブループリント（トピックユニバース）
+
+<!-- /udemy-exam-prep:create-sections が学習ガイドから起草する。
+     ドメインごとにタスクステートメントとサブトピックを列挙し、
+     front matter の domains と1対1で対応させる。 -->
+
+## 配分表
+
+<!-- create-sections が front matter の domains から生成する。 -->
+
+## セクション一覧
+
+<!-- create-sections が {{MOCK_EXAMS}} 本分の行を生成する。 -->

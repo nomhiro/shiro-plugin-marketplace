@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.superpowers/
+.claude/settings.local.json
+Thumbs.db
+.DS_Store

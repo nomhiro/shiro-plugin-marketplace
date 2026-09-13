@@ -1,0 +1,11 @@
+# Question Bank — {{MOCK_EXAMS}}本横断 出題済みインデックス
+
+> 目的: 2本目以降の question-author が重複を回避するための参照テーブル。
+> 更新ルール: exam-validator が各セクション検証後に追記する。
+> 重複判定キー: (task_statement, tested_concept)。既定では全{{MOCK_EXAMS}}本を通じて最大2回まで
+> （front matter の任意キー `max_per_concept` で上限を変更できる）。
+> 同じ本の中では1回まで。複数回出す場合はシナリオと問い方（根本原因の特定／最善の修正／
+> アンチパターンの識別 など）を必ず変える。
+
+| section | q# | domain | task_statement | tested_concept | scenario | 問題文冒頭60字 |
+|---|---|---|---|---|---|---|

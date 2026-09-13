@@ -31,7 +31,7 @@ Udemy の試験対策演習テスト講座は現在、試験ごとのプロジ�
 | リポジトリ公開範囲 | **Public** | harness に問題本文（payload）を含まないため機密性の問題がない。`/plugin marketplace add nomhiro/shiro-plugin-marketplace` だけで追加でき、他マシンへの展開も容易 |
 | プラグイン粒度 | **単一プラグイン `udemy-exam-prep`** | `create-section` → `question-author` → `quiz-csv-format` の依存が密結合で、分割の実利が薄い |
 | テンプレート配置 | **プラグイン内 `templates/exam-course/` + `init-exam-course` スキル** | プラグイン更新でテンプレートも自動追従。手動コピーとプレースホルダ手置換が不要 |
-| 対応資格スコープ | **汎用（任意ベンダー）** | 情報源をプロジェクト側 front matter で宣言。Microsoft / GitHub / Cloudflare / IPA / generic のレシピをプラグインが保持 |
+| 対応資格スコープ | **汎用（任意ベンダー）** | 情報源をプロジェクト側 front matter で宣言。Anthropic / Microsoft / GitHub / Cloudflare / IPA / generic のレシピをプラグインが保持 |
 | セクション構成モード | **mock-exam のみ** | AI-103 で確立した最新世代に絞る。ドメイン配分ノルマ・`question-bank` 重複管理が全てこのモード前提 |
 | 試験プロファイルの宣言場所 | **`sections.md` の front matter** | 既にメタデータ行（`> mode:` `> Source of Truth:` `> 試験概要:`）を持ち、スキルが読んでいるファイル。新規ファイルを増やさない |
 | AI-103 の既存 `.claude/` | **併存（削除しない）** | プロジェクトローカルがプラグインより優先されるため挙動不変。新規講座で実動作を検証してから削除を判断 |
@@ -208,7 +208,7 @@ domains:
 | `cert` | ✓ | string | 試験番号。ディレクトリ名・コースタイトルに使用 | 全スキル |
 | `cert_name` | ✓ | string | 正式名称（原語） | `create-udemy-course` |
 | `cert_name_ja` | | string | 日本語名称。無い場合は `cert_name` を使う | `create-udemy-course` |
-| `vendor` | ✓ | enum | `microsoft` / `github` / `cloudflare` / `ipa` / `generic` | `research-cert-docs` / `doc-researcher` |
+| `vendor` | ✓ | enum | `anthropic` / `microsoft` / `github` / `cloudflare` / `ipa` / `generic` | `research-cert-docs` / `doc-researcher` |
 | `credential_url` | | url | 認定資格ページ | `create-udemy-course` |
 | `study_guide` | ✓ | url | 学習ガイド。ブループリント抽出元 | `create-sections` |
 | `mode` | ✓ | enum | 現状 `mock-exam` のみ。他値はエラー | `create-section` / `exam-validator` |
@@ -377,9 +377,10 @@ AI-103 での回帰テストは実施しない。プロジェクトローカル�
 
 ## 10. 未確定事項
 
-| 項目 | 内容 | 確定方法 |
+| 項目 | 内容 | 状態 |
 |---|---|---|
-| プラグイン同梱エージェントの名前空間 | `agents/` に置いたサブエージェントが `doc-researcher` で解決されるか `udemy-exam-prep:doc-researcher` になるかをドキュメントで確証できていない。公式マーケットプレイスには `agents/` を持つプラグインが8個存在するため機構自体は確実に存在する | スモークテスト手順6で実測し、結果に応じて `create-section` / `create-sections` 内のエージェント呼び出し名を確定する |
+| プラグイン同梱エージェントの名前空間 | `agents/` に置いたサブエージェントが `doc-researcher` で解決されるか `udemy-exam-prep:doc-researcher` になるか | **未確定。** スクリプトとスキルは実測なしで確定できたが、エージェント名の解決はプラグインを実インストールしないと確認できない。公式マーケットプレイスには `agents/` を持つプラグインが8個あるため機構自体は存在する。`create-section` / `create-sections` はエージェントを名前で呼ぶが、Claude Code は同名エージェントを解決できる想定で書いてある。解決に失敗した場合は呼び出し名に `udemy-exam-prep:` を付ける1行修正で済む |
+| スクリプトの直接実行 | `python .../scripts/x.py` で兄弟モジュールが解決できるか | **確定・修正済み。** 当初 `ModuleNotFoundError` で全滅していた（pytest では `pythonpath` 設定のため通っていた）。各スクリプトに `__package__` 判定の sys.path ブートストラップを追加し、CLI をサブプロセスで叩く `tests/test_cli.py`（8本）で回帰を防いでいる |
 
 ## 11. スコープ外
 
