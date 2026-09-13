@@ -118,7 +118,7 @@ def position_balance(
 
 
 def worst_relative_deviation(rows: list[list[str]], qtype: str = "multiple-choice") -> float:
-    """最悪の相対偏差。シード選択の目的関数。期待票数0の位置は無視する。"""
+    """指定タイプの最悪相対偏差。期待票数0の位置は無視する。"""
     worst = 0.0
     for entry in position_balance(rows, qtype):
         exp = entry["expected"]
@@ -126,6 +126,19 @@ def worst_relative_deviation(rows: list[list[str]], qtype: str = "multiple-choic
             continue
         worst = max(worst, abs(entry["actual"] - exp) / exp)
     return worst
+
+
+def combined_worst_deviation(rows: list[list[str]]) -> float:
+    """multiple-choice と multi-select の両方を見た最悪相対偏差。
+
+    シード選択の目的関数。MC だけを最適化すると MS に偏りが残り、
+    「multi-select では選択肢1を必ず入れる」といった攻略が成立してしまう
+    （実績: 15問の MS のうち11問で位置1が正解に含まれる状態が発生した）。
+    """
+    return max(
+        worst_relative_deviation(rows, "multiple-choice"),
+        worst_relative_deviation(rows, "multi-select"),
+    )
 
 
 def balance_warnings(rows: list[list[str]]) -> list[str]:
@@ -158,10 +171,14 @@ def _shuffled(base: list[list[str]], seed: int) -> list[list[str]]:
 def choose_seed(
     base: list[list[str]], max_seed: int = DEFAULT_SEED_RANGE
 ) -> tuple[int, float]:
-    """正解位置が最も均等になるシードを走査して返す。"""
+    """正解位置が最も均等になるシードを走査して返す。
+
+    multiple-choice と multi-select の両方を同時に見る（片方だけ最適化すると
+    もう片方に攻略可能な偏りが残る）。
+    """
     best_seed, best_worst = 1, float("inf")
     for seed in range(1, max_seed + 1):
-        worst = worst_relative_deviation([["Question"]] + _shuffled(base, seed))
+        worst = combined_worst_deviation([["Question"]] + _shuffled(base, seed))
         if worst < best_worst:
             best_seed, best_worst = seed, worst
         if worst <= GOOD_ENOUGH:
@@ -181,7 +198,7 @@ def shuffle_file(
     if seed is None:
         seed, worst = choose_seed(base, max_seed=max_seed)
     else:
-        worst = worst_relative_deviation([header] + _shuffled(base, seed))
+        worst = combined_worst_deviation([header] + _shuffled(base, seed))
 
     final = [header] + _shuffled(base, seed)
     write_rows(path, final)

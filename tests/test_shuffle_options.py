@@ -146,3 +146,26 @@ def test_shuffle_file_output_still_validates(tmp_path):
 def test_shuffle_file_reports_the_original_path(tmp_path):
     p = build(tmp_path, [row() for _ in range(4)])
     assert shuffle_file(p)["raw"].endswith("quiz.raw.csv")
+
+
+def test_combined_deviation_sees_both_question_types():
+    """MC が完璧でも MS が偏っていれば combined は大きくなる。"""
+    from scripts.shuffle_options import combined_worst_deviation
+    rows = [list(HEADER)]
+    rows += [row(correct=str(p)) for p in (1, 2, 3, 4)] * 4      # MC は完璧
+    rows += [row(correct="1,2", qt="multi-select") for _ in range(12)]  # MS は位置1,2に固定
+    assert worst_relative_deviation(rows, "multiple-choice") == 0.0
+    assert combined_worst_deviation(rows) > 0.5
+
+
+def test_seed_search_balances_multi_select_too(tmp_path):
+    """MS だけを含むファイルでもシード走査が偏りを解消すること。
+
+    MC だけを目的関数にしていた頃は MS に「位置1を必ず含む」偏りが残り、
+    受講者が攻略できる状態になっていた。
+    """
+    p = build(tmp_path, [row(correct="1,2", qt="multi-select") for _ in range(16)])
+    result = shuffle_file(p)
+    ms = {e["position"]: e for e in result["ms_balance"]}
+    assert all(e["within_tolerance"] for e in ms.values()), ms
+    assert result["warnings"] == []
