@@ -20,15 +20,26 @@ if __package__ in (None, ""):
 
 from scripts.validate_quiz_csv import read_rows, write_rows
 
-# host -> 強制するロケールセグメント（None はロケールを持たないサイト = 変更しない）
+# host -> 強制するロケールセグメント
+#
+# 値を入れるのは「ロケールがホスト直後の第1パスセグメントにあるサイト」だけ。
+#   OK:  https://docs.claude.com/en/docs/claude-code/...   <- 第1セグメントがロケール
+#   NG:  https://code.claude.com/docs/en/agent-sdk/...     <- ロケールは第2セグメント
+# 後者に規則を入れると code.claude.com/en/docs/en/... と URL を壊すため、
+# ロケールが第1セグメントに来ないサイトは必ず None（= 一切触らない）にする。
 LOCALE_RULES: dict[str, str | None] = {
     "learn.microsoft.com": "en-us",
     "docs.microsoft.com": "en-us",
     "docs.claude.com": "en",
     "docs.anthropic.com": "en",
     "docs.github.com": "en",
+    # ロケールが /docs/ の下にあるので触らない
+    "code.claude.com": None,
+    "platform.claude.com": None,
+    # ロケールセグメントを持たないサイト
     "developers.cloudflare.com": None,
     "modelcontextprotocol.io": None,
+    "www.anthropic.com": None,
     "www.ipa.go.jp": None,
 }
 

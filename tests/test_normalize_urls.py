@@ -33,6 +33,33 @@ def test_leaves_locale_less_sites_untouched():
     assert LOCALE_RULES["developers.cloudflare.com"] is None
 
 
+def test_never_corrupts_hosts_whose_locale_is_not_the_first_segment():
+    """code.claude.com/docs/en/... にロケール規則を当てると /en/docs/en/ に壊れる。
+
+    CCA-F の調査 digest で最も多く参照されるホストなので、壊さないことを固定する。
+    """
+    for url in (
+        "https://code.claude.com/docs/en/agent-sdk/subagents",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering",
+    ):
+        assert normalize_text(url) == (url, 0), url
+    assert LOCALE_RULES["code.claude.com"] is None
+    assert LOCALE_RULES["platform.claude.com"] is None
+
+
+def test_every_rule_with_a_locale_puts_it_in_the_first_segment():
+    """規則に値を入れてよいのは第1セグメントがロケールのホストだけ、という不変条件。"""
+    known_first_segment_locale = {
+        "learn.microsoft.com", "docs.microsoft.com",
+        "docs.claude.com", "docs.anthropic.com", "docs.github.com",
+    }
+    for host, locale in LOCALE_RULES.items():
+        if locale is not None:
+            assert host in known_first_segment_locale, (
+                f"{host} に locale 規則があるが、第1セグメントがロケールか未確認"
+            )
+
+
 def test_leaves_unknown_hosts_untouched():
     url = "https://example.com/whatever/page"
     assert normalize_text(url) == (url, 0)
