@@ -85,7 +85,7 @@ def validate_csv(path) -> list[str]:
 
         # セル内改行は Udemy の一括取り込みでの破損要因。csv としては正しく
         # 引用されるので他の検査は通ってしまうため、ここで明示的に落とす。
-        # （実績: CCA-F の2・3本目の Overall Explanation に段落区切りが入り、
+        # （実績: ある講座の2・3本目の Overall Explanation に段落区切りが入り、
         #  4本は単一行という非対称が生まれた）
         for ci, cell in enumerate(row, 1):
             if any(ch in cell for ch in NEWLINE_CHARS):

@@ -9,6 +9,16 @@
 **/quiz.sample.csv
 .skilltest/
 
+# ドメイン別の作問パート（quiz.raw.csv と _parts/bank-rows.md で内容は保全される）
+**/_parts/D*.csv
+**/_parts/*-meta.tsv
+
+# 作問エージェントへ渡す中間ファイル（used_concepts.py で再生成可能）
+.work/used-*.md
+
+# Playwright MCP の作業ディレクトリ
+.playwright-mcp/
+
 # 一時スクリプト（エージェントの作業残骸が混入した場合の保険）
 /*.py
 

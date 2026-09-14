@@ -116,7 +116,7 @@ def test_init_course_cli_creates_a_project(tmp_path):
         "--mock-exams", "2", "--questions-per-exam", "10",
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "6 created" in proc.stdout
+    assert "8 created" in proc.stdout
     assert (tmp_path / "CLAUDE.md").is_file()
     assert (tmp_path / ".gitignore").is_file()
 

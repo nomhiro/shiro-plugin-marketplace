@@ -57,6 +57,16 @@ def _output_name(src: Path) -> str:
     return name
 
 
+def _output_relpath(src: Path, tdir: Path) -> Path:
+    """テンプレート内の相対パスを保ったまま出力先を決める。
+
+    `research/AUTHORING-GUARDRAILS.md.tmpl` のようにサブディレクトリを持つ
+    テンプレートがあるため、ファイル名だけでなく階層も維持する。
+    """
+    rel = src.relative_to(tdir)
+    return rel.parent / _output_name(src)
+
+
 def init_course(
     dest, values: dict[str, str], template_dir=None
 ) -> dict[str, list[str]]:
@@ -72,19 +82,22 @@ def init_course(
     created: list[str] = []
     skipped: list[str] = []
 
-    for src in sorted(tdir.iterdir()):
+    for src in sorted(tdir.rglob("*")):
         if not src.is_file():
             continue
-        out = dest / _output_name(src)
+        rel = _output_relpath(src, tdir)
+        out = dest / rel
+        label = rel.as_posix()
         if out.exists():
-            skipped.append(out.name)
+            skipped.append(label)
             continue
+        out.parent.mkdir(parents=True, exist_ok=True)
         if src.suffix in _COPY_AS_IS:
             shutil.copyfile(src, out)
         else:
             text = render(src.read_text(encoding="utf-8"), values)
             out.write_text(text, encoding="utf-8", newline="\n")
-        created.append(out.name)
+        created.append(label)
 
     return {"created": created, "skipped": skipped}
 

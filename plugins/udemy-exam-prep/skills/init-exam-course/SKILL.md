@@ -1,6 +1,6 @@
 ---
 name: init-exam-course
-description: 試験番号を引数に、新しい試験対策問題集プロジェクトをテンプレートから初期化する。CLAUDE.md / sections.md / question-bank.md / removed-questions.md / .gitignore / Udemy CSV 参考ファイルを展開し、試験仕様をプレースホルダ置換で埋める。既存ファイルは上書きしない。スラッシュコマンド `/udemy-exam-prep:init-exam-course CCA-F` または「CCA-F の講座プロジェクトを作って」で起動。
+description: 試験番号を引数に、新しい試験対策問題集プロジェクトをテンプレートから初期化する。CLAUDE.md / sections.md / question-bank.md / removed-questions.md / AUTHOR-BRIEF.md / research/AUTHORING-GUARDRAILS.md / .gitignore / Udemy CSV 参考ファイルを展開し、試験仕様をプレースホルダ置換で埋める。既存ファイルは上書きしない。スラッシュコマンド `/udemy-exam-prep:init-exam-course CCA-F` または「CCA-F の講座プロジェクトを作って」で起動。
 ---
 
 # init-exam-course
@@ -27,7 +27,9 @@ CCA-F の講座プロジェクトを作って
 | `question-bank.md` | 本横断の出題済みインデックス（空テーブル） |
 | `removed-questions.md` | 退避問題の保管場所（空テーブル） |
 | `.gitignore` | ローカル設定・中間ファイルの除外 |
-| `PracticeTestBulkQuestionUploadTemplate_v2.csv` | Udemy 17カラム形式の参考ファイル |
+| `AUTHOR-BRIEF.md` | 作問エージェント共通ブリーフの雛形。**資格固有の方針を書き足して使う**（並列作問で全エージェントに読ませる1枚） |
+| `research/AUTHORING-GUARDRAILS.md` | 作問ガードレールの雛形。digest の「未解決の論点」を畳み込む先 |
+| `PracticeTestBulkQuestionUploadTemplate_V2.2.csv` | Udemy 17カラム形式の参考ファイル |
 
 **既存ファイルは絶対に上書きしません。** 存在するものは skip して報告します。何度実行しても安全なので、テンプレートに新ファイルが追加されたあとの差分適用にも使えます。
 
@@ -73,20 +75,35 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/init_course.py" \
 出力例:
 
 ```
-  created: .gitignore
+  created: AUTHOR-BRIEF.md
   created: CLAUDE.md
-  created: PracticeTestBulkQuestionUploadTemplate_v2.csv
+  created: .gitignore
+  created: PracticeTestBulkQuestionUploadTemplate_V2.2.csv
   created: question-bank.md
   created: removed-questions.md
+  created: research/AUTHORING-GUARDRAILS.md
   created: sections.md
-OK: 6 created, 0 skipped
+OK: 8 created, 0 skipped
 ```
+
+テンプレートはサブディレクトリを保ったまま展開されます（`research/` 配下など）。
 
 スクリプトは未知のプレースホルダが残っていたら `InitError` で止まります（置換漏れの取りこぼしを防ぐ）。
 
 ## ステップ3: 展開結果の確認
 
 `created` / `skipped` の一覧をそのままユーザーに提示します。
+
+**展開直後にやること（ユーザーに伝える）:**
+
+1. `sections.md` の front matter の任意キーを埋める
+   - `forbidden_sources` — 出典に使ってはいけないホスト（受験申込の製品ページ・転送される旧ホスト）
+   - `source_titles` — `sources.md` に出すホストの表示名
+   - `guide_citation` — Exam Guide だけが根拠の事実に使う出典表記
+   - `max_per_concept` — 同一概念を何本まで再利用してよいか
+2. `AUTHOR-BRIEF.md` に**資格固有の方針**を書き足す（出題言語・用語表記・distractor の型）。
+   機械検査される基準（§4-1 選択肢の長さ / §7-1 正解肢の文面）は変えない
+3. `research/AUTHORING-GUARDRAILS.md` は digest 作成後に埋める（[[create-section]] の Step 2 の後）
 
 front matter が読めることを確認します。
 

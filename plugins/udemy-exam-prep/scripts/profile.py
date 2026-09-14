@@ -112,6 +112,43 @@ def validate_profile(profile: dict) -> list[str]:
     return errs
 
 
+def forbidden_sources(profile: dict) -> dict[str, str]:
+    """出典に使ってはいけないホストと、その理由。
+
+    front matter の任意キー `forbidden_sources`（`host` と `reason` を持つ要素の配列）
+    から読む。指定がなければ空。資格ごとに事情が違う（製品ページで本文を含まない、
+    旧ホストで転送される、など）ので harness 側にハードコードしない。
+    """
+    out: dict[str, str] = {}
+    for item in profile.get("forbidden_sources") or []:
+        if isinstance(item, dict) and item.get("host"):
+            out[str(item["host"]).strip()] = str(item.get("reason", "")).strip()
+        elif isinstance(item, str):
+            out[item.strip()] = ""
+    return out
+
+
+def source_titles(profile: dict) -> dict[str, str]:
+    """ホスト名 → sources.md に出す表示名。任意キー `source_titles`（辞書）から読む。"""
+    raw = profile.get("source_titles") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k).strip(): str(v).strip() for k, v in raw.items()}
+
+
+def guide_citation(profile: dict) -> str:
+    """Exam Guide だけが根拠の事実に使う出典表記。
+
+    任意キー `guide_citation` を優先し、無ければ `exam_code`（無ければ `cert`）から
+    組み立てる。`check_sources.py` が「URL は無いが出典はある」行を認めるために使う。
+    """
+    explicit = profile.get("guide_citation")
+    if explicit:
+        return str(explicit).strip()
+    code = profile.get("exam_code") or profile.get("cert") or ""
+    return f"公式 Exam Guide（{code}）".strip()
+
+
 def domain_quota(profile: dict) -> dict[str, int]:
     return {d["id"]: d["per_exam"] for d in profile["domains"]}
 

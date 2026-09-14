@@ -15,6 +15,15 @@ question_types:
   multiple-choice: "60-70%"
   multi-select: "30-40%"
 scenario_ratio_min: "30%"
+max_per_concept: 2
+# Exam Guide だけが根拠の事実に使う出典表記（make_sources_md / check_sources が読む）
+guide_citation: 公式 Exam Guide（{{CERT_ID}}）
+# 出典に使ってはいけないホスト（check_sources / audit_course が読む）
+# 受験申込の製品ページ・転送される旧ホストなど、クリックしても何も得られないものを挙げる
+forbidden_sources: []
+# sources.md に出すホストの表示名（make_sources_md が読む）
+# 形式: code.example.com: 製品ドキュメント
+source_titles: {}
 primary_sources: []
 # domains は /udemy-exam-prep:create-sections が学習ガイドから確定させる。
 # 形式: - {id: D1, name: ..., ratio: "27%", per_exam: 16}

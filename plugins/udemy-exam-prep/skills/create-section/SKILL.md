@@ -135,28 +135,88 @@ Overall Explanation: ... | 出典: ...
 | 「全部やり直し」 | Step 4a からやり直し |
 | 「キャンセル」 | `quiz.sample.csv` を削除して終了 |
 
-#### Step 4c: 残り問題の生成
+#### Step 4c: 残り問題の生成（ドメイン別の並列 + パートファイル）
 
-サンプル承認後、question-author を **残り問題数モード** で起動する。
+サンプル承認後、**ドメインごとに question-author を並列起動する**。同じメッセージ内に複数の
+Agent tool 呼び出しを置く。1ドメインあたり10〜16問なのでコンテキストが軽く、全体が速い。
 
-- 目標問題数: `questions_per_exam` − サンプル数
-- サンプル `quiz.sample.csv` を「スタイル基準」として渡す
-- **ドメイン別ノルマ**と**タスクステートメント割当表**を渡す
-- **`question-bank.md`** を渡す（重複回避）
-- 既存 `quiz.csv` があればマージ
-- 出力先は `<folder>/quiz.csv`（サンプルもマージして含める）
+**各エージェントには `quiz.csv` を直接書かせてはいけない。** 並列で同じファイルに書くと
+読み込み→書き戻しで競合し、片方の成果が消える。**パートファイル方式**を使う。
 
-ドメイン単位で分割起動すると各エージェントのコンテキストが軽くなる。分割する場合は**起動ごとに `question-bank.md` の最新状態**を渡す。
+| エージェントの出力 | 内容 |
+|---|---|
+| `<folder>/_parts/<ドメインID>.csv` | 担当ドメイン分だけの17カラム CSV（ヘッダーあり） |
+| `<folder>/_parts/<ドメインID>-meta.tsv` | CSV と同順・ヘッダーなし・タブ区切り6列（`連番` / `ドメインID` / `task_statement` / `tested_concept` / `scenario` / `問題文の冒頭60字`） |
 
-完了後 `quiz.sample.csv` は削除する（`quiz.csv` に取り込み済み）。
+結合はスクリプトが決定的に行う（`front matter` の `domains` 順に並べ、通し番号を振る）。
+
+**共通の作問契約は1つのブリーフに書いて渡す。** 各エージェントのプロンプトに同じ2,500トークンを
+コピーすると、指示のずれと待ち時間が増える。`init-exam-course` が展開する
+`.work/AUTHOR-BRIEF.md` に共通事項（出題言語・選択肢の長さ基準・解説の書き方・出典の書き方・
+重複回避・出力形式・自己チェック）を書き、各プロンプトは**担当ドメイン・問題数・配分・
+読む digest・そのドメイン固有の注意**だけにする。
+
+各エージェントへの個別指定:
+- 担当ドメインID と `Domain` 列に書く正式名
+- 問題数、task_statement 別の配分、`multiple-choice` / `multi-select` の数、シナリオ別の配分
+- 読む digest のパス
+- `used_concepts.py` の出力（既出概念。下記）
+- そのドメインのガードレール（`research/AUTHORING-GUARDRAILS.md` の該当節）
+
+**3本目以降は既出概念の一覧を機械生成して渡す。** 手書きでプロンプトに貼るのは維持できない。
+
+```bash
+for d in D1 D2 D3 D4 D5; do
+  python "${CLAUDE_PLUGIN_ROOT}/scripts/used_concepts.py" "$d" > ".work/used-$d.md"
+done
+```
+
+上限に達した概念が何件あるかを確認し、**残り枠が必要問題数を下回っていないか**を先に見る。
+
+完了後 `quiz.sample.csv` は削除する（サンプルは担当ドメインのパートに取り込ませる）。
 
 ### Step 5: 品質ゲート（シャッフル前に必ず通す）
 
-まず CSV 整合性を検証する。
+**工程順は `finalize_section.py` が固定している。** 個別に叩くより、これ1本で通すほうが
+順序の取り違えと工程の飛ばしを防げる（11工程・失敗したらそこで停止）。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/finalize_section.py" <folder>
+```
+
+工程: パート結合 → CSV 整合性 → 出典検査 → **長さバイアス** → URL 正規化 →
+ドメイン配分 → question-bank 追記 → 本横断の重複 → シャッフル → CSV 再検証 → 統計。
+
+以下は各工程を個別に確認したいときの内訳。**どれも飛ばしてはいけない。**
+
+パートを結合して `quiz.csv` を作る（配分・`Domain` 列・meta 行数を同時に検証する）。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/merge_parts.py" <folder> --keep-parts
+```
+
+CSV 整合性を検証する。
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" <folder>/quiz.csv
 ```
+
+出典を検査する（出典の欠落と、front matter の `forbidden_sources` に挙げたホストの混入）。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/check_sources.py" <folder>/quiz.csv --sections sections.md
+```
+
+**正解肢の長さバイアスを検査する。内容修正を伴うので必ずシャッフル前に通す。**
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/check_option_balance.py" <folder>/quiz.csv
+```
+
+正解肢が体系的に長いと、**受講者は問題文を読まずに「長い選択肢」を選ぶだけで正解できる**。
+実績として、ある講座の1本目は MC 90問中70問（78%）で正解肢が最長だった。位置を
+シャッフルしても長さは付いてくるので、シャッフルでは解消できない。FAIL したら
+**不正解肢に具体的な実装内容を書き込んで長さを揃える**か、**根拠の説明を `Explanation` 側へ移す**。
 
 次に [[exam-validator]] を起動する。入力: 対象セクション番号 / `quiz.csv` / `sections.md` / `question-bank.md` / `removed-questions.md`。
 
@@ -216,7 +276,29 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/shuffle_options.py" <folder>/quiz.csv
 - 期待票数は「その位置を実際に提供した問題」からのみ積む厳密モデル。4択中心に5/6択が混在しても位置5・6が誤検知にならない
 - `WARN:` が1件も出なければ合格
 
-`<folder>/sources.md` を [[research-cert-docs]] の「sources.md フォーマット」に従って書き出す。exam-validator でシラバス外問題を退避した場合は問題番号を振り直す。
+`<folder>/sources.md` は生成する（手書きしない）。`quiz.csv` と `_parts/bank-rows.md` から
+出典一覧と問題ごとの対応表を作る。ホストの表示名と Exam Guide 出典の表記は front matter の
+`source_titles` / `guide_citation` から読む。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/make_sources_md.py" <folder> --sections sections.md
+```
+
+**最後の本を作り終えたら、講座全体を横断監査する。**
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/audit_course.py"
+python "${CLAUDE_PLUGIN_ROOT}/scripts/audit_course.py" --check-urls   # URL 到達も確認（時間がかかる）
+```
+
+セクション数・総問題数・ドメイン別累計・タスクステートメント網羅・シナリオ分布・
+概念の再利用回数・正解位置の分布・出典ホスト・**問題文の横断類似（82%）**・
+**正解肢の横断類似（80%）** をまとめて見る。
+
+> **正解肢の類似検査は概念レベルの重複検査とは別物。** `tested_concept` のラベルを
+> 言い換えれば概念検査は通るが、**正解として提示する事実の文面が同じなら、先の本を
+> 解いた受講者は見覚えだけで正解できる**。実績として、ラベルが別なのに正解肢が
+> 90% 一致していた組が3件見つかった。
 
 ### Step 9: 一時ファイルの後始末（機械的）
 
@@ -227,6 +309,11 @@ rm -f ./*.py
 rm -f <folder>/quiz.sample.csv
 rm -f research/*-check.txt research/*.tmp
 ```
+
+**パートファイルは結合後に削除してよい**（`_parts/bank-rows.md` は残す）。内容は
+`quiz.raw.csv`（結合済み・シャッフル前）と `bank-rows.md` で保全される。
+`.gitignore` に `**/_parts/D*.csv` と `**/_parts/*-meta.tsv` を入れておく
+（`init-exam-course` が展開する `.gitignore` に含まれている）。
 
 **保持するもの（削除しない）:** 各セクションの `quiz.csv` / `sources.md` / **`quiz.raw.csv`（再ロール用の原本）**、`research/*.md`（共有 digest）、`question-bank.md`、`removed-questions.md`。
 ※ ルート直下にプロジェクト管理用の `.py` を恒久的に置く運用をする場合は、ファイル名を限定して消すこと。

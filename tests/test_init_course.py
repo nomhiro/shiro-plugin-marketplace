@@ -19,7 +19,9 @@ EXPECTED_FILES = {
     "question-bank.md",
     "removed-questions.md",
     ".gitignore",
-    "PracticeTestBulkQuestionUploadTemplate_v2.csv",
+    "PracticeTestBulkQuestionUploadTemplate_V2.2.csv",
+    "AUTHOR-BRIEF.md",
+    "research/AUTHORING-GUARDRAILS.md",
 }
 
 
@@ -78,7 +80,7 @@ def test_init_course_is_idempotent_and_never_overwrites(tmp_path):
 
 def test_csv_template_has_the_17_column_header(tmp_path):
     init_course(tmp_path, VALUES)
-    header = (tmp_path / "PracticeTestBulkQuestionUploadTemplate_v2.csv").read_text(
+    header = (tmp_path / "PracticeTestBulkQuestionUploadTemplate_V2.2.csv").read_text(
         encoding="utf-8-sig"
     ).splitlines()[0]
     assert len(header.split(",")) == 17
