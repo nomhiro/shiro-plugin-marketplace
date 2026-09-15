@@ -7,6 +7,7 @@
 工程:
   1. パートを結合して quiz.csv を作る（配分・Domain 列・meta 行数を検証）
   2. CSV 整合性の検証
+  2.5 解説の整合・文体・訳（正誤印 x Correct Answers など）
   3. 出典の検査（認定ページ・旧ホストの混入、出典の欠落）
   4. 正解肢の長さバイアス検出（margin。内容修正が必要なのでシャッフル前に置く）
   5. 出典 URL のロケール正規化（冪等）
@@ -105,6 +106,11 @@ def main(argv: list[str]) -> int:
     run("1. パートの結合", [str(HERE / "merge_parts.py"), a.section,
                            "--sections", a.sections, "--keep-parts"])
     run("2. CSV 整合性", [str(HERE / "validate_quiz_csv.py"), quiz])
+    # 形式検証では検出できない欠陥（正解番号が誤答肢を指している・訳の欠落・
+    # 文体の混在・出典 URL の詰め書き）をここで落とす。内容修正を伴うため
+    # シャッフルより前に置く。front matter に style が無ければ自動でスキップ。
+    run("2.5 解説の整合・文体・訳",
+        [str(HERE / "check_style.py"), quiz, "--sections", a.sections])
 
     src_argv = [str(HERE / "check_sources.py"), quiz, "--sections", a.sections]
     if a.check_urls:

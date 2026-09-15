@@ -154,12 +154,57 @@ def balance_warnings(rows: list[list[str]]) -> list[str]:
     return warnings
 
 
+def row_fingerprint(row: list[str]) -> tuple:
+    """選択肢の並び順に依存しない行の指紋。
+
+    シャッフルは行内の選択肢を並べ替えるだけなので、原本とその出力は
+    この指紋が一致する。一致しなければ quiz.csv は原本に由来していない。
+    """
+    pairs = tuple(sorted((row[opt], row[exp]) for opt, exp in OPTION_PAIRS))
+    return (row[0], row[1], row[15], row[16], pairs)
+
+
+def raw_is_stale(path, raw) -> bool:
+    """quiz.csv が quiz.raw.csv に由来していないなら True。"""
+    cur = read_rows(path)
+    base = read_rows(raw)
+    if len(cur) != len(base):
+        return True
+    for a, b in zip(cur[1:], base[1:]):
+        if len(a) != 17 or len(b) != 17:
+            if a != b:
+                return True
+            continue
+        if row_fingerprint(a) != row_fingerprint(b):
+            return True
+    return False
+
+
 def ensure_raw(path, raw_path=None) -> Path:
-    """原本を一度だけ退避する。既に存在すれば触らない。"""
+    """原本を退避する。整合しない原本は作り直す。
+
+    既存の原本が現在の quiz.csv と**整合しない**（= quiz.csv が原本に由来しない）
+    場合は原本を作り直す。作り直さないと、`_parts` を修正して結合し直した内容が
+    古い原本からのシャッフルに静かに上書きされる。
+
+    実績: `_parts` の4問を差し替えて `finalize_section.py` を再実行したが、
+    原本を温存したため merge の出力が古い原本から上書きされ、**3回の実行を
+    またいで差し替えが反映されなかった。その間すべての検証は OK を返した。**
+
+    なお quiz.csv を手で編集した場合も原本は作り直される。原本の唯一の用途は
+    再ロールであり、quiz.csv を再現できない原本は定義上すでに無効なため。
+    """
     path = Path(path)
     raw = Path(raw_path) if raw_path else path.with_name("quiz.raw.csv")
     if not raw.exists():
         shutil.copyfile(path, raw)
+        return raw
+    if raw_is_stale(path, raw):
+        shutil.copyfile(path, raw)
+        print(
+            f"NOTE: {raw.name} が現在の {path.name} と整合しないため作り直しました"
+            f"（{path.name} が結合し直されたか手で編集されています）"
+        )
     return raw
 
 

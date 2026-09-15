@@ -1,7 +1,8 @@
 import random
 from scripts.shuffle_options import (
     balance_warnings, choose_seed, ensure_raw, position_balance,
-    position_distribution, shuffle_file, shuffle_row, worst_relative_deviation,
+    position_distribution, raw_is_stale, shuffle_file, shuffle_row,
+    worst_relative_deviation,
 )
 from scripts.validate_quiz_csv import HEADER, read_rows, validate_csv, write_rows
 
@@ -101,12 +102,49 @@ def test_ensure_raw_creates_the_original_once(tmp_path):
     assert raw.read_bytes() == p.read_bytes()
 
 
-def test_ensure_raw_never_overwrites_an_existing_original(tmp_path):
-    p = build(tmp_path, [row()])
+def test_ensure_raw_keeps_the_original_when_quiz_is_a_shuffle_of_it(tmp_path):
+    """再ロールのために原本を温存する（正規の経路）。"""
+    p = build(tmp_path, [row(), row(correct="2")])
     raw = ensure_raw(p)
     before = raw.read_bytes()
-    p.write_text("clobbered", encoding="utf-8")
+    # シャッフル後の quiz.csv は原本と同じ内容を並べ替えただけ
+    shuffle_file(p, seed=7)
+    assert p.read_bytes() != before
     assert ensure_raw(p).read_bytes() == before
+
+
+def test_ensure_raw_rebuilds_a_stale_original(tmp_path):
+    """原本が現在の quiz.csv を再現できないなら作り直す。
+
+    これを温存すると、`_parts` を結合し直した内容が古い原本からのシャッフルに
+    静かに上書きされる（実績: 4問の差し替えが3回の finalize をまたいで失われた）。
+    """
+    p = build(tmp_path, [row()])
+    ensure_raw(p)
+    # quiz.csv を結合し直した想定（問題が1問増え、内容も変わる）
+    write_rows(p, [list(HEADER), row(), row(correct="3")])
+    raw = ensure_raw(p)
+    assert raw.read_bytes() == p.read_bytes()
+
+
+def test_raw_is_stale_detects_changed_content_but_not_reordering(tmp_path):
+    p = build(tmp_path, [row(), row(correct="2")])
+    raw = ensure_raw(p)
+    shuffle_file(p, seed=3)
+    assert raw_is_stale(p, raw) is False
+    write_rows(p, [list(HEADER), row(), row(correct="2"), row(correct="4")])
+    assert raw_is_stale(p, raw) is True
+
+
+def test_shuffle_file_reflects_edits_made_to_quiz_csv(tmp_path):
+    """事故の再現テスト: quiz.csv を差し替えてから再シャッフルしても内容が残る。"""
+    p = build(tmp_path, [row()])
+    shuffle_file(p, seed=1)
+    replaced = row(correct="1")
+    replaced[0] = "REPLACED?"
+    write_rows(p, [list(HEADER), replaced])
+    shuffle_file(p, seed=1)
+    assert read_rows(p)[1][0] == "REPLACED?"
 
 
 def test_shuffle_file_always_reads_from_the_original(tmp_path):

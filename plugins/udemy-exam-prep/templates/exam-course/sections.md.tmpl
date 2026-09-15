@@ -16,6 +16,24 @@ question_types:
   multi-select: "30-40%"
 scenario_ratio_min: "30%"
 max_per_concept: 2
+# 非シナリオ型（scenario_ratio_min の分母から除く型）。既定は knowledge のみ
+non_scenario_codes: ["knowledge"]
+# 解説の整合・文体・訳の検査（check_style が読む。この節を消すと検査はスキップされる）
+#
+# 形式検証は「正解番号が誤答肢を指している」を検出できない。解説の冒頭に
+# 正誤の印を書く運用にしておけば、印と Correct Answers の突き合わせで落とせる。
+# body_sentence_end は「解説本体が満たすべき文末」、translation_sentence_end は
+# 「訳が満たしてはいけない文末」として使う（例: 本体=ですます調 / 訳=常体）。
+style: {}
+#   explanation_markers:
+#     correct: "正解です。"
+#     incorrect: "不正解。"
+#   option_translation_marker: "【訳】"
+#   question_translation_marker: "【設問の訳】"
+#   body_sentence_end: "(です|ます|ません|ました|でした|でしょう|ください)(か|ね|よ)?$"
+#   translation_sentence_end: "(です|ます|ません|ました|でした|でしょう|ください)(か|ね|よ)?$"
+#   require_space_after_source_url: true
+#   skip_sentence_pattern: "出典|参考|https?://"
 # Exam Guide だけが根拠の事実に使う出典表記（make_sources_md / check_sources が読む）
 guide_citation: 公式 Exam Guide（{{CERT_ID}}）
 # 出典に使ってはいけないホスト（check_sources / audit_course が読む）
