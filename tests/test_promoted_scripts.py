@@ -20,6 +20,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "plugins" / "udemy-exam-prep"
 PROMOTED = (
     "merge_parts.py", "finalize_section.py", "check_sources.py",
     "audit_course.py", "used_concepts.py", "make_sources_md.py",
+    "check_style.py",
 )
 
 

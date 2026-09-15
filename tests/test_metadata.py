@@ -4,6 +4,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PLUGIN = REPO / "plugins" / "udemy-exam-prep"
 
+# リリースするバージョン。marketplace.json と plugin.json の両方に同じ値が
+# 入っていることを検証する（片方だけ上げる事故を落とすため、ここを唯一の定義元にする）
+VERSION = "0.2.0"
+
 
 def _load(p):
     return json.loads(p.read_text(encoding="utf-8"))
@@ -17,14 +21,23 @@ def test_marketplace_json_shape():
     assert names == ["udemy-exam-prep"]
     entry = m["plugins"][0]
     assert entry["source"] == "./plugins/udemy-exam-prep"
-    assert entry["version"] == "0.1.0"
+    assert entry["version"] == VERSION
     assert entry["description"].strip()
+
+
+def test_the_two_manifests_declare_the_same_version():
+    """片方だけ上げる事故を落とす。"""
+    m = _load(REPO / ".claude-plugin" / "marketplace.json")
+    p = _load(PLUGIN / ".claude-plugin" / "plugin.json")
+    assert m["metadata"]["version"] == VERSION
+    assert m["plugins"][0]["version"] == VERSION
+    assert p["version"] == VERSION
 
 
 def test_plugin_json_shape():
     p = _load(PLUGIN / ".claude-plugin" / "plugin.json")
     assert p["name"] == "udemy-exam-prep"
-    assert p["version"] == "0.1.0"
+    assert p["version"] == VERSION
     assert p["description"].strip()
     assert p["author"]["name"] == "nomhiro"
 

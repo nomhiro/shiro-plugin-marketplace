@@ -38,7 +38,11 @@ from scripts.profile import (  # noqa: E402
 )
 
 # 末尾の句読点・閉じ括弧は URL に含めない
-URL_RE = re.compile(r"https?://[^\s)）、。，」』】>]+")
+# 日本語・全角文字で停止させる。停止させないと
+# `出典: https://example.com/page【設問の訳】…` のような詰め書きで
+# URL が訳文を飲み込み、--check-urls が 404 で落ちる（実績: ある講座で27箇所）。
+# 旧版は 】 だけを除外し 【 を含めていなかったため、ここを取り逃がしていた。
+URL_RE = re.compile(r"https?://[^\s\u3000-\u9fff\uff00-\uffef)）、。，」』【】>]+")
 # Exam Guide 参照の既定パターン（front matter の guide_citation があればそれを使う）
 DEFAULT_GUIDE_RE = re.compile(r"Exam\s*Guide")
 
