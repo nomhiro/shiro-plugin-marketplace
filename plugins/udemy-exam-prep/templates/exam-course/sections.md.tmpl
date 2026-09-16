@@ -3,14 +3,36 @@ cert: {{CERT_ID}}
 cert_name: {{CERT_NAME}}
 vendor: {{VENDOR}}
 study_guide: {{STUDY_GUIDE_URL}}
-mode: mock-exam
+mode: {{MODE}}
 exam:
   minutes: {{EXAM_MINUTES}}
   pass_score: {{PASS_SCORE}}
   max_score: 1000
   language: ja
 mock_exams: {{MOCK_EXAMS}}
+# mock-exam モード: 全本この問題数。mixed モード: フル模試枠の問題数
+#（= domains[].per_exam の合計。説明文の「本番相当」表記にも使う）
 questions_per_exam: {{QUESTIONS_PER_EXAM}}
+# mode: mixed のときだけ必須。本ごとの Source of Truth。
+# create-sections が domains を確定させたあとに埋める。
+#   slug      … セクションフォルダ名（そのまま使う）
+#   kind      … drill（分野別演習）/ mock（本番相当のフル模試）
+#   questions … その本の問題数
+#   minutes   … Udemy の制限時間
+#   domains   … その本のドメイン別ノルマ。合計が questions と一致すること。
+#                省略すると全ドメイン横断（domains[].per_exam をそのまま使う）
+# sections:
+#   - slug: section01-drill-1
+#     title: 分野別演習①
+#     kind: drill
+#     questions: 130
+#     minutes: 110
+#     domains: {D1: 70, D2: 60}
+#   - slug: section04-mock-exam-1
+#     title: 模擬試験 第1回
+#     kind: mock
+#     questions: {{QUESTIONS_PER_EXAM}}
+#     minutes: {{EXAM_MINUTES}}
 question_types:
   multiple-choice: "60-70%"
   multi-select: "30-40%"

@@ -11,7 +11,11 @@ VALUES = {
     "PASS_SCORE": "720",
     "MOCK_EXAMS": "6",
     "QUESTIONS_PER_EXAM": "60",
+    "MODE": "mock-exam",
 }
+
+# mixed モード（本ごとに問題数と配分が違う構成）で展開したときの値
+MIXED_VALUES = {**VALUES, "MODE": "mixed"}
 
 EXPECTED_FILES = {
     "CLAUDE.md",
@@ -25,9 +29,16 @@ EXPECTED_FILES = {
 }
 
 
-def test_placeholders_are_exactly_eight():
-    assert len(PLACEHOLDERS) == 8
+def test_placeholders_match_the_values_fixture():
+    """プレースホルダの増減はここで検出する。
+
+    個数のリテラル固定（8個）はプレースホルダを1つ足すたびに壊れる一方、
+    「テンプレートとテストの値がずれた」という本当に見たい事故は
+    この集合比較で捕まる。
+    """
     assert set(PLACEHOLDERS) == set(VALUES)
+    assert len(PLACEHOLDERS) == len(set(PLACEHOLDERS)), "重複がある"
+    assert all(k.isupper() for k in PLACEHOLDERS)
 
 
 def test_render_substitutes_known_keys():
@@ -93,3 +104,17 @@ def test_written_files_have_no_bom(tmp_path):
     for name in EXPECTED_FILES:
         raw = (tmp_path / name).read_bytes()
         assert not raw.startswith(b"\xef\xbb\xbf"), f"{name} に BOM がある"
+
+
+def test_expanded_sections_md_is_valid_in_mixed_mode(tmp_path):
+    """mixed で展開した直後は sections が未記入（コメントのみ）。
+
+    この時点では domains も未確定なので FAIL が正常。ただし
+    「mode が未対応」のような**値の誤り**は出ていてはいけない。
+    """
+    init_course(tmp_path, MIXED_VALUES)
+    profile = load_profile(tmp_path / "sections.md")
+    assert profile["mode"] == "mixed"
+    errs = validate_profile(profile)
+    assert any("domains" in e for e in errs), errs
+    assert not any("mode" in e for e in errs), errs

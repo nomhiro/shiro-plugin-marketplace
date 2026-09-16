@@ -48,3 +48,19 @@ def test_unprintable_characters_do_not_raise():
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     assert proc.returncode == 0, proc.stderr[:300]
+
+
+def test_every_cli_script_calls_safe_stdout():
+    """CLI は main() の冒頭で safe_stdout() を呼ぶ。
+
+    呼び忘れると、その1本だけ日本語出力がパイプ先で文字化けする
+    （実績: merge_parts.py が呼んでおらず、結合結果の報告が読めなかった）。
+    """
+    missing = []
+    for path in sorted(SCRIPTS.glob("*.py")):
+        if path.name in ("__init__.py", "_console.py"):
+            continue
+        src = path.read_text(encoding="utf-8")
+        if "def main(" in src and "safe_stdout()" not in src:
+            missing.append(path.name)
+    assert missing == [], f"safe_stdout() を呼んでいない: {missing}"

@@ -17,7 +17,12 @@ if __package__ in (None, ""):
 from scripts._console import safe_stdout
 
 VENDORS = ("anthropic", "microsoft", "github", "cloudflare", "ipa", "generic")
-MODES = ("mock-exam",)
+MODES = ("mock-exam", "mixed")
+# mixed モードの各セクションの種別
+#   drill = 分野別演習（ドメインを絞れる・時間は緩め）
+#   mock  = 本番相当のフル模試（全ドメイン横断）
+SECTION_KINDS = ("drill", "mock")
+REQUIRED_SECTION = ("slug", "title", "kind", "questions", "minutes")
 
 REQUIRED_TOP = (
     "cert", "cert_name", "vendor", "study_guide", "mode",
@@ -109,6 +114,93 @@ def validate_profile(profile: dict) -> list[str]:
     if isinstance(qpe, int) and total != qpe:
         errs.append(f"per_exam の合計 {total} が questions_per_exam {qpe} と一致しない")
 
+    if profile.get("mode") == "mixed":
+        errs.extend(_validate_sections(profile, seen, total))
+
+    return errs
+
+
+def _validate_sections(profile: dict, domain_ids: set, global_total: int) -> list:
+    """mixed モードの sections を検証する。
+
+    mock-exam モードは「N本すべて同じ問題数のフル模試」なので
+    domains[].per_exam だけで表現できる。mixed は本ごとに問題数もドメイン配分も
+    違うため、sections が本ごとの Source of Truth になる。
+    """
+    errs = []
+    sections = profile.get("sections")
+    if not isinstance(sections, list) or not sections:
+        return ["mode: mixed では sections が非空のリストである必要がある"]
+
+    want = profile.get("mock_exams")
+    if isinstance(want, int) and len(sections) != want:
+        errs.append(f"sections が {len(sections)} 件だが mock_exams は {want}")
+
+    slugs = set()
+    for i, sec in enumerate(sections, 1):
+        if not isinstance(sec, dict):
+            errs.append(f"sections[{i}] がマッピングではない")
+            continue
+        for key in REQUIRED_SECTION:
+            if key not in sec:
+                errs.append(f"sections[{i}] に必須キー '{key}' がない")
+
+        slug = sec.get("slug")
+        if slug in slugs:
+            errs.append(f"sections[{i}]: duplicate slug '{slug}'")
+        if slug is not None:
+            slugs.add(slug)
+
+        kind = sec.get("kind")
+        if kind is not None and kind not in SECTION_KINDS:
+            errs.append(
+                f"sections[{i}]: kind '{kind}' は未対応。"
+                f"{SECTION_KINDS} のいずれかにする"
+            )
+
+        for key in ("questions", "minutes"):
+            val = sec.get(key)
+            if val is not None and (not isinstance(val, int) or val < 1):
+                errs.append(
+                    f"sections[{i}]: {key} は 1 以上の整数にする（現在: {val!r}）"
+                )
+
+        n = sec.get("questions")
+        quota = sec.get("domains")
+        if quota is None:
+            # domains 省略 = 全ドメイン横断（domains[].per_exam をそのまま使う）
+            if isinstance(n, int) and n != global_total:
+                errs.append(
+                    f"sections[{i}] '{slug}': domains を省略しているので questions は "
+                    f"per_exam 合計の {global_total} でなければならない（現在: {n}）"
+                )
+            continue
+
+        if not isinstance(quota, dict) or not quota:
+            errs.append(f"sections[{i}] '{slug}': domains が非空のマッピングではない")
+            continue
+
+        unknown = sorted(set(quota) - domain_ids)
+        if unknown:
+            errs.append(
+                f"sections[{i}] '{slug}': 未知の domain id {unknown}"
+                f"（domains に定義されているのは {sorted(domain_ids)}）"
+            )
+        sec_total = 0
+        for did, v in quota.items():
+            if not isinstance(v, int) or v < 0:
+                errs.append(
+                    f"sections[{i}] '{slug}': domains.{did} は 0 以上の整数にする"
+                    f"（現在: {v!r}）"
+                )
+            else:
+                sec_total += v
+        if isinstance(n, int) and sec_total != n:
+            errs.append(
+                f"sections[{i}] '{slug}': domains の合計 {sec_total} が "
+                f"questions {n} と一致しない"
+            )
+
     return errs
 
 
@@ -149,8 +241,81 @@ def guide_citation(profile: dict) -> str:
     return f"公式 Exam Guide（{code}）".strip()
 
 
-def domain_quota(profile: dict) -> dict[str, int]:
-    return {d["id"]: d["per_exam"] for d in profile["domains"]}
+def domain_quota(profile: dict, section=None) -> dict[str, int]:
+    """ドメイン別の出題ノルマ。
+
+    section を渡すと**そのセクションの**ノルマを返す（mixed モードでは本ごとに
+    配分が違う）。section を渡さない場合・解決できない場合は
+    domains[].per_exam をそのまま返すので、既存の呼び出しは挙動が変わらない。
+    """
+    globally = {d["id"]: d["per_exam"] for d in profile["domains"]}
+    if section is None:
+        return globally
+    spec = resolve_section(profile, section)
+    if spec is None:
+        return globally
+    return spec["quota"]
+
+
+def section_specs(profile: dict) -> list:
+    """本ごとの仕様を正規化して返す。
+
+    **mock-exam モードも mixed の特殊ケースとして同じ形で返す**ので、
+    呼び出し側は mode を気にしなくてよい。キーは
+    slug / title / kind / questions / minutes / quota。
+    """
+    globally = {d["id"]: d["per_exam"] for d in profile["domains"]}
+    if profile.get("mode") != "mixed":
+        n = profile["mock_exams"]
+        qpe = profile["questions_per_exam"]
+        minutes = (profile.get("exam") or {}).get("minutes")
+        return [
+            {
+                "slug": f"section{i:02d}-mock-exam-{i}",
+                "title": f"模擬試験 第{i}回",
+                "kind": "mock",
+                "questions": qpe,
+                "minutes": minutes,
+                "quota": dict(globally),
+            }
+            for i in range(1, n + 1)
+        ]
+
+    specs = []
+    for sec in profile["sections"]:
+        quota = sec.get("domains")
+        specs.append(
+            {
+                "slug": sec["slug"],
+                "title": sec["title"],
+                "kind": sec["kind"],
+                "questions": sec["questions"],
+                "minutes": sec["minutes"],
+                "quota": dict(quota) if quota else dict(globally),
+            }
+        )
+    return specs
+
+
+def resolve_section(profile: dict, ref):
+    """セクション参照を仕様に解決する。slug / フォルダ名 / パス / 1始まりの番号。
+
+    スクリプトはセクションフォルダやその中の quiz.csv のパスを受け取るので、
+    `section01-drill-1/quiz.csv` のようなパスからも引けるようにしておく。
+    解決できなければ None を返す（呼び出し側は全体ノルマにフォールバックする）。
+    """
+    specs = section_specs(profile)
+    if isinstance(ref, int):
+        return specs[ref - 1] if 1 <= ref <= len(specs) else None
+
+    text = str(ref).replace(chr(92), "/").rstrip("/")
+    parts = [x for x in text.split("/") if x]
+    by_slug = {x["slug"]: x for x in specs}
+    # パスの末尾から順に見て slug と一致する要素を探す
+    for part in reversed(parts):
+        if part in by_slug:
+            return by_slug[part]
+    return None
 
 
 def domain_names(profile: dict) -> dict[str, str]:
@@ -173,12 +338,17 @@ def main(argv: list[str]) -> int:
         for e in errs:
             print(f"  - {e}")
         return 1
-    q = domain_quota(profile)
+    specs = section_specs(profile)
+    total = sum(x["questions"] for x in specs)
     print(
         f"OK: {profile['cert']} / mode={profile['mode']} / "
-        f"{profile['mock_exams']} exams x {profile['questions_per_exam']} questions / "
-        f"quota={q}"
+        f"{len(specs)} sections / {total} questions"
     )
+    for x in specs:
+        print(
+            f"  {x['slug']}  {x['kind']:<5} {x['questions']:>4}問 "
+            f"{x['minutes']}分  quota={x['quota']}"
+        )
     return 0
 
 

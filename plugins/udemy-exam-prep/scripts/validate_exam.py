@@ -15,7 +15,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.profile import domain_names, domain_quota, load_profile
+from scripts.profile import (
+    domain_names, domain_quota, load_profile, resolve_section,
+)
 from scripts._console import safe_stdout
 from scripts.validate_quiz_csv import read_rows
 
@@ -32,10 +34,19 @@ def domain_counts(rows: list[list[str]]) -> dict[str, int]:
     return dict(counter)
 
 
-def check_quota(rows: list[list[str]], profile: dict) -> list[str]:
+def check_quota(
+    rows: list[list[str]], profile: dict, section=None
+) -> list[str]:
+    """ドメイン配分と総問題数を検証する。
+
+    section を渡すと**そのセクションの**ノルマと問題数で検証する
+    （mixed モードでは本ごとに違う）。渡さない場合は全体ノルマと
+    questions_per_exam で検証するので、既存の呼び出しは挙動が変わらない。
+    """
     counts = domain_counts(rows)
     names = domain_names(profile)
-    quota = domain_quota(profile)
+    quota = domain_quota(profile, section)
+    spec = resolve_section(profile, section) if section is not None else None
     name_to_id = {v: k for k, v in names.items()}
 
     errors: list[str] = []
@@ -44,13 +55,25 @@ def check_quota(rows: list[list[str]], profile: dict) -> list[str]:
             errors.append(
                 f'unknown Domain value "{name}" - must be one of {sorted(name_to_id)}'
             )
+    # このセクションのノルマに**含まれていない**ドメインの問題を明示的に落とす。
+    # mixed モードの drill は担当ドメインを絞るため、担当外のドメインが混ざると
+    # 「担当ドメインが N 問足りない」という間接的な報告しか出ず、原因が読めない
+    # （実績: drill の1問を D1 -> D2 に変えたら D1 の不足しか報告されなかった）。
+    for name, got in sorted(counts.items()):
+        did = name_to_id.get(name)
+        if did is not None and did not in quota:
+            errors.append(
+                f'{did} "{name}": {got} questions, but this section\'s quota '
+                f"covers only {sorted(quota)}"
+            )
+
     for did, want in quota.items():
         got = counts.get(names[did], 0)
         if got != want:
             errors.append(f'{did} "{names[did]}": {got} questions, expected {want}')
 
     total = sum(counts.values())
-    want_total = profile.get("questions_per_exam")
+    want_total = spec["questions"] if spec else profile.get("questions_per_exam")
     if want_total is not None and total != want_total:
         errors.append(f"total {total} questions, expected {want_total}")
     return errors
@@ -122,7 +145,7 @@ def main(argv: list[str]) -> int:
     failed = False
 
     for target in a.csv_paths:
-        errors = check_quota(read_rows(target), profile)
+        errors = check_quota(read_rows(target), profile, section=target)
         if errors:
             failed = True
             print(f"FAIL {target}: {len(errors)} quota/syllabus error(s)")

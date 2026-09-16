@@ -43,7 +43,7 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/profile.py" sections.md
 | 項目 | 雛形 / 出典 |
 |------|------|
 | **コース名**（**60字上限**） | `【認定資格練習問題集】{cert} {cert_name_ja または cert_name}` |
-| **サブタイトル**（120字） | 出題領域の要約 + 「フル模試{mock_exams}回・計{mock_exams × questions_per_exam}問・全問詳細解説つき」 |
+| **サブタイトル**（120字） | 出題領域の要約 + 「フル模試{mock_exams}回・計{総問題数}問・全問詳細解説つき」。**総問題数は `profile.py` の出力の合計値を使う**（`mode: mixed` では本ごとに問題数が違うので掛け算では出ない） |
 | **説明文**（200語以上） | 下記構成 |
 | **カテゴリ** | IT とソフトウェア > IT資格（最も近いもの） |
 | **言語** | 日本語 |
@@ -70,7 +70,7 @@ python -c "t=input(); print(len(t), 'OK' if len(t)<=60 else '超過')"
 1. コースの目的（1文）
 2. 試験概要 — front matter の `exam_code` / `questions_per_exam` / `exam.minutes` / `exam.pass_score` / `exam.max_score` / 受験料 / 有効期限 / 配信方式
 3. ドメインとウェイト（front matter の `domains`）
-4. 問題集の構成 — 各演習テストの内容と問題数
+4. 問題集の構成 — 各演習テストの内容と問題数。**`mode: mixed` では本ごとに役割が違うので、`kind` と `questions` と `minutes` を表にして見せる**（受講者が解く順序を判断できるようにする）
 5. **出題言語の設計とその理由** — front matter の `exam.language` が実試験に合わせて英語の場合、「本番と同じ英語出題＋全問日本語解説」という設計であることと、その根拠を明記する（受講者が最も知りたい差別化要素）
 6. 解説の作り — 正解の理由に加えて不正解選択肢が何を意味しどこが違うかまで説明し、出典 URL を付けていること
 7. 学習内容（`sections.md` のセクション一覧）

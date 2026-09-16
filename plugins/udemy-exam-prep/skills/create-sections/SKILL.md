@@ -79,7 +79,45 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/profile.py" sections.md
 2. 合計が合わなければ、**ウェイトが大きいドメインから ±1** して合わせる
 3. どのドメインも 1 以上にする
 
-このハーネスは **mock-exam モード固定**。ドメイン数によらず常に `mock_exams` 本のフル模試を作り、各本が全ドメインを横断する（parallel forms）。
+このハーネスは**2つのモード**を持つ。`mode` は初期化時に決まっているので、**起草の前に front matter を読んで確認する。**
+
+| mode | 構成 | 使いどころ |
+|---|---|---|
+| `mock-exam`（既定） | `mock_exams` 本のフル模試。**全本同じ問題数**で各本が全ドメインを横断（parallel forms） | 本番の問題数がそのまま6本ぶん作れる規模のとき |
+| `mixed` | 本ごとに問題数・時間・ドメイン配分が違う。**`sections` が本ごとの Source of Truth** | 本番が大問題数で、分野別演習 → フル模試の段階構成にしたいとき |
+
+### mixed モードの起草手順（Step 4 のあとに行う）
+
+`domains` を確定させたら、`sections` を**全件明示的に**書く。
+
+```yaml
+sections:
+  - slug: section01-drill-1        # フォルダ名そのもの
+    title: 分野別演習① AI基礎・機械学習
+    kind: drill                    # drill = 分野別演習 / mock = 本番相当
+    questions: 130
+    minutes: 110
+    domains: {D1: 70, D2: 60}      # 合計が questions と一致すること
+  - slug: section04-mock-exam-1
+    title: 模擬試験 第1回
+    kind: mock
+    questions: 145
+    minutes: 100
+    # domains 省略 = 全ドメイン横断（domains[].per_exam をそのまま使う）
+```
+
+原則:
+
+1. **`mock` 枠は `domains` を省略する。** 省略時は `domains[].per_exam` が使われるので、
+   `questions` は `per_exam` の合計（= `questions_per_exam`）と一致していなければならない
+2. **`drill` 枠は `domains` を明示する。** 絞ったドメインの合計を `questions` に一致させる
+3. **`drill` 枠の配分は、そのドメインの `ratio` の比で按分する**（丸めは Step 4 と同じ原則）
+4. **各ドメインの累計が枯れないか確認する。** `sections` 全体での
+   ドメイン別合計（`profile.py` の出力に出る）が、そのドメインの素材量に対して
+   多すぎないかを見る。1ドメインに数百問を割り当てると作問が破綻する
+5. `slug` は**フォルダ名として実在させる**（`create-section` と `audit_course` がこの名前で引く）
+
+検証はスクリプトが行う。**`sections` の合計や未知の domain id は `profile.py` が落とす。**
 
 ### Step 5: フォルダ名の確定
 
@@ -198,6 +236,8 @@ sections.md を起草しました。保存前にレビューをお願いしま�
 2. タスクステートメントと箇条書きが公式ガイドすべてに対応しているか（網羅性）
 3. front matter 検証5項目が通っているか
    - 必須キーの存在 / per_exam 合計 = questions_per_exam / domain id 一意 / mode / mock_exams・questions_per_exam >= 1
+   - `mode: mixed` なら追加で: `sections` の件数 = `mock_exams` / slug 一意 / kind が drill|mock /
+     各本の `domains` 合計 = その本の `questions` / `domains` 省略時は `questions` = per_exam 合計 / 未知の domain id なし
 4. 配分表の合計が1本={questions_per_exam}問・{N}本={合計}問になっているか
 5. Out-of-Scope が転記されているか
 

@@ -30,9 +30,36 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/profile.py" sections.md
 
 `OK:` が出ることを確認し、出力から以下を得る。
 
-- `questions_per_exam` — このセクションの目標問題数
+- `questions_per_exam` — このセクションの目標問題数（**`mode: mixed` では本ごとに違う。下記参照**）
 - `quota` — ドメイン別ノルマ（`{'D1': 16, 'D2': 11, ...}`）
 - `mock_exams` — 全体の本数
+
+### `mode: mixed` では本ごとのノルマをスクリプトから取る
+
+本ごとに問題数もドメイン配分も違うので、**front matter を目で読んで写さない。**
+`profile.py` が本ごとの仕様を一覧で出すので、担当セクションの行をそのまま使う。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/profile.py" sections.md
+```
+
+```
+OK: G検定 / mode=mixed / 6 sections / 825 questions
+  section01-drill-1      drill  130問 110分  quota={'D1': 70, 'D2': 60}
+  section04-mock-exam-1  mock   145問 100分  quota={'D1': 20, 'D2': 25, ...}
+```
+
+**作問エージェントに渡すのはこの `quota` の値。** `merge_parts.py` と
+`validate_exam.py` は**フォルダ名から本ごとのノルマを引く**ので、
+セクションフォルダ名を front matter の `slug` と一致させておくこと
+（一致しないと全体ノルマで検証され、配分違反を取り逃がす）。
+
+`kind` によって作問の方針が変わる:
+
+| kind | 方針 |
+|---|---|
+| `drill` | 担当ドメインを深く。同一ドメイン内で task_statement を網羅する。時間は緩めなので設問は長くてよい |
+| `mock` | 全ドメイン横断。**本番相当の難易度と時間圧**を前提に、1問の読解量を抑える |
 
 `sections.md` 本文から以下も読む。
 
@@ -400,7 +427,7 @@ section{N} の問題集生成パイプラインが完了しました。
 （ランダムに3問の全文）
 
 確認ポイント:
-1. 問題数が {questions_per_exam} 問か
+1. 問題数がそのセクションの目標問題数か（`mode: mixed` では `profile.py` の出力の該当行）
 2. ドメイン配分がノルマ通りか
 3. 退避問題が想定外に多くないか（10%超ならブループリントを見直し）
 4. 正解位置分布に WARN が出ていないか

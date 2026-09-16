@@ -41,6 +41,7 @@ if __package__ in (None, ""):
 from scripts._console import safe_stdout  # noqa: E402
 from scripts.profile import (  # noqa: E402
     domain_names, domain_quota, forbidden_sources, load_profile,
+    section_specs,
 )
 from scripts.shuffle_options import position_balance  # noqa: E402
 from scripts.validate_quiz_csv import (  # noqa: E402
@@ -154,9 +155,12 @@ def audit(profile: dict, bank_path: Path, check_urls: bool) -> tuple[list[str], 
     problems: list[str] = []
     warnings: list[str] = []
     names = domain_names(profile)
-    quota = domain_quota(profile)
-    per_exam = profile["questions_per_exam"]
-    want_exams = profile["mock_exams"]
+    # 本ごとの仕様（mock-exam モードは同じ仕様が N 本並ぶ形で返る）
+    specs = section_specs(profile)
+    by_slug = {s["slug"]: s for s in specs}
+    quota = domain_quota(profile)          # 累計表示用の全体ノルマ
+    want_exams = len(specs)
+    want_total = sum(s["questions"] for s in specs)
     cap = profile.get("max_per_concept", 2)
 
     paths = section_paths()
@@ -170,11 +174,24 @@ def audit(profile: dict, bank_path: Path, check_urls: bool) -> tuple[list[str], 
         all_rows.extend(rows)
         counts = Counter(r[16] for r in rows)
         types = Counter(r[1] for r in rows)
-        line = f"{p.parent.name}: {len(rows)}問  {dict(types)}"
-        print(f"  {line}")
-        if len(rows) != per_exam:
-            problems.append(f"{p.parent.name}: {len(rows)}問（{per_exam}問必要）")
-        for did, want in quota.items():
+        # フォルダ名で本ごとの仕様を引く。front matter に無いフォルダは
+        # 構成ミスなので問題として報告する（黙って全体ノルマで測らない）。
+        spec = by_slug.get(p.parent.name)
+        if spec is None:
+            problems.append(
+                f"{p.parent.name}: front matter の sections に無いフォルダ"
+            )
+            print(f"  {p.parent.name}: {len(rows)}問  {dict(types)}  (未登録)")
+            continue
+        print(
+            f"  {p.parent.name}: {len(rows)}問  {dict(types)}  "
+            f"[{spec['kind']}]"
+        )
+        if len(rows) != spec["questions"]:
+            problems.append(
+                f"{p.parent.name}: {len(rows)}問（{spec['questions']}問必要）"
+            )
+        for did, want in spec["quota"].items():
             got = counts.get(names[did], 0)
             if got != want:
                 problems.append(
@@ -182,11 +199,12 @@ def audit(profile: dict, bank_path: Path, check_urls: bool) -> tuple[list[str], 
                 )
 
     print(f"\n=== 累計 ===")
-    print(f"総問題数: {len(all_rows)}（目標 {per_exam * want_exams}）")
+    print(f"総問題数: {len(all_rows)}（目標 {want_total}）")
     print(f"形式: {dict(Counter(r[1] for r in all_rows))}")
-    for did, want in quota.items():
+    for did in quota:
         got = sum(1 for r in all_rows if r[16] == names[did])
-        print(f"  {did} {names[did]}: {got}（目標 {want * want_exams}）")
+        want = sum(s["quota"].get(did, 0) for s in specs)
+        print(f"  {did} {names[did]}: {got}（目標 {want}）")
 
     # --- question-bank による概念・シナリオ・カバレッジの監査 ---
     entries = parse_question_bank(bank_path)

@@ -32,9 +32,19 @@ Udemy のコースに問題集をアップロードして
 
 テスト設定値は `sections.md` の front matter から自動で決まる（下表）。ユーザーが別値を指示した場合はそれに従う。
 
+**本ごとの値はスクリプトから取る**（front matter を目で読んで写さない）。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/profile.py" sections.md
+```
+
+出力の `slug` がセクションフォルダ名、`title` が Udemy に入れるテスト名、
+`questions` が期待問題数、`minutes` が制限時間。**投入件数の検証にもこの
+`questions` を使う**（`mode: mixed` では本ごとに違うため、全本同数を期待すると誤検出する）。
+
 | 項目 | 値 |
 |------|---|
-| 時間（分） | front matter の `exam.minutes` をそのまま（本番と同条件）。無い場合は `問題数 × 1.5` |
+| 時間（分） | `mode: mock-exam` は front matter の `exam.minutes` をそのまま（本番と同条件）。**`mode: mixed` は本ごとに違うので `profile.py` の出力の `minutes` を使う。** どちらも無い場合は `問題数 × 1.5` |
 | 合格最低点（%） | 70 |
 | 質問と回答の順序をランダム化 | **ON**（必須） |
 

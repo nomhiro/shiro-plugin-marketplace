@@ -26,6 +26,7 @@ PLACEHOLDERS = (
     "PASS_SCORE",
     "MOCK_EXAMS",
     "QUESTIONS_PER_EXAM",
+    "MODE",
 )
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "exam-course"
@@ -114,6 +115,11 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--pass-score", required=True)
     ap.add_argument("--mock-exams", default="6")
     ap.add_argument("--questions-per-exam", default="50")
+    ap.add_argument(
+        "--mode", default="mock-exam", choices=("mock-exam", "mixed"),
+        help="mock-exam=全本同じ問題数のフル模試 / "
+             "mixed=本ごとに問題数と配分が違う（分野別演習＋模試など）",
+    )
     a = ap.parse_args(argv[1:])
 
     values = {
@@ -125,6 +131,7 @@ def main(argv: list[str]) -> int:
         "PASS_SCORE": a.pass_score,
         "MOCK_EXAMS": a.mock_exams,
         "QUESTIONS_PER_EXAM": a.questions_per_exam,
+        "MODE": a.mode,
     }
     try:
         result = init_course(a.dest, values)

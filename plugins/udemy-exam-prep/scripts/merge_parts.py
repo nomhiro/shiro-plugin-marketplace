@@ -24,6 +24,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
+from scripts._console import safe_stdout  # noqa: E402
 from scripts.profile import domain_names, domain_quota, load_profile  # noqa: E402
 from scripts.validate_quiz_csv import (  # noqa: E402
     HEADER, read_rows, validate_csv, write_rows,
@@ -60,7 +61,9 @@ def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
         raise SystemExit(f"{parts_dir} がない。先に各ドメインのパートを生成する")
 
     names = domain_names(profile)
-    quota = domain_quota(profile)
+    # mixed モードでは本ごとに配分が違うので、セクション名で引く。
+    # mock-exam モードや未登録のフォルダ名では全体ノルマに落ちる。
+    quota = domain_quota(profile, section.name)
 
     merged: list[list[str]] = [list(HEADER)]
     bank: list[str] = []
@@ -135,6 +138,7 @@ def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
 
 
 def main(argv: list[str]) -> int:
+    safe_stdout()
     ap = argparse.ArgumentParser(description="ドメイン別パートを quiz.csv に結合する")
     ap.add_argument("section", help="例: section01-mock-exam-1")
     ap.add_argument("--sections", default="sections.md")
