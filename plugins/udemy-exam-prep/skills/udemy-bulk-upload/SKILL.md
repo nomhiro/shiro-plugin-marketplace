@@ -53,16 +53,41 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" section0*/quiz.csv
 
 ## ステップ4: 演習テストの追加（最大6本）
 
+**3つの名前を混同しないこと**（実測の正確な名前）。
+
 ```
-1. カリキュラム編集ページで「新しいカリキュラム項目」をクリック
-2. 「演習テストを追加」を選択
-3. タイトル入力（sections.md のセクション名のみ。「セクションN:」プレフィックスは含めない）
-4. 2つ目以降は、直前のテスト下部の「新しいカリキュラム項目」ボタンから追加
+1. カリキュラム編集ページで button "カリキュラム項目を追加" をクリック
+2. ドロップダウンの button "演習テスト 認定資格準備の時間制限付き試験" を選ぶ
+3. textbox "タイトル（60文字以内）" に入力
+   （sections.md のセクション名のみ。「セクションN:」プレフィックスは含めない）
+4. 送信は button "演習テストを追加"（「追加」ではない）
+5. 2つ目以降は、直前のテスト下部の "カリキュラム項目を追加" から同じ手順
 ```
+
+**6本を先にまとめて作り、あとで1本ずつ設定と投入をするのが速い。**
+作成のたびに返る `編集` リンクの `quizId` を記録しておく。
+
+### 「編集」と「削除」は隣接している
+
+テスト行には `img "編集"` を持つ **link** と `img "削除"` を持つ **button** が並ぶ。
+ref を1つ取り違えると削除に当たる。
+
+> 実績: 編集だと思った ref が削除で、`カリキュラム項目を削除しようとしています。
+> よろしいですか？` のダイアログが出た。**`キャンセル` を押せば無傷で戻れる**が、
+> `OK` を押すと 60 問ごと消える。**クリック前に snapshot の `img` の名前で
+> link / button のどちらかを確かめる。**
 
 ## ステップ5: 各テストの設定
 
-各演習テストの編集ページ（URL に `quizId=YYYY` を含む）で設定する。
+各演習テストの編集ページで設定する。URL は次の形。
+
+```
+https://www.udemy.com/course/<courseId>/manage/practice-test/?quizId=<quizId>
+```
+
+**`/instructor` を付けてはいけない。** 付けると `/instructor/course/<id>/manage/404`
+にリダイレクトされる（カリキュラムページの方は `/instructor` 付きなので紛れやすい）。
+カリキュラムの `編集` リンクの `/url` はこの相対パスで出る。
 
 | 項目 | 値 |
 |------|--------|
@@ -71,25 +96,94 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" section0*/quiz.csv
 | 質問と回答の順序をランダム化 | **ON**（必須） |
 
 **Playwright の注意点:**
-- 「質問と回答の順序をランダム化」チェックボックスはラベル要素に遮られて直接クリックできない。**親の generic 要素またはラベルテキスト**をクリックする
+
+- 欄は**構造で取る**のが確実。`input[type="number"]` の **nth(0)=時間 / nth(1)=合格点**
+  （アクセシビリティ名は再描画で落ちる）
+- 「質問と回答の順序をランダム化」の `input[type="checkbox"]` は `ud-sr-only` で隠れており、
+  `label[class*="ud-switch-container"]` が pointer events を遮る。
+  **input の `id` を読んで `label[for="<id>"]` を押す:**
+
+  ```js
+  const cb = page.locator('input[type="checkbox"]').first();
+  const id = await cb.getAttribute('id');          // 実測: "switch--43"（ページ毎に変わる）
+  if (!(await cb.isChecked())) await page.locator(`label[for="${id}"]`).click();
+  ```
+
+  > 「親の generic 要素をクリック」は**当たるページと当たらないページがある。**
+  > 実績: 1本目は親 generic で成功したが、2本目は同じ手順で
+  > `label[class*="ud-switch-container"] intercepts pointer events` で失敗した。
+  > `label[for=<id>]` は6本すべてで成功した。
+
 - 設定変更後は必ず「保存」ボタンを `browser_click`
+- **保存しても成功の根拠にしない。** リロードして `spinbutton` の値と
+  `checkbox ... [checked]` を読み直す
 
 ## ステップ6: CSV 一括アップロード
 
+**「CSVファイルのアップロード」ボタンは押さない。**
+押すとネイティブのファイル選択ダイアログが滞留し、他のツールが
+`does not handle the modal state` で全滅する。ダイアログを開かせる代わりに、
+**モーダル内に既に存在する `input[type="file"]` へ `setInputFiles` で直接渡す。**
+
+```js
+async () => {
+  await page.getByRole('button', { name: '質問を追加' }).click();
+  await page.getByRole('button', { name: '一括アップロード' }).click();
+  await page.waitForSelector('input[type="file"]', { state: 'attached' });
+  await page.locator('input[type="file"]').setInputFiles('<abs>/quiz.csv');
+  await page.getByText('問題が作成されます。').first()
+            .waitFor({ state: 'visible', timeout: 60000 });
+  await page.getByRole('button', { name: '閉じる', exact: true }).click();
+}
 ```
-1. テスト編集ページで「質問を追加」→「一括アップロード」→「CSVファイルのアップロード」
-2. ネイティブのファイル選択ダイアログが開く（Modal state: [File chooser]）
-3. browser_file_upload で対応する quiz.csv のパスを渡す
-4. アップロード完了まで8〜10秒待機（browser_wait_for で「アップロード完了」テキストを待つ）
-5. 成功メッセージを確認してダイアログを閉じる
-6. 「公開」操作（必要なら）
-```
+
+実測した細部:
+
+| 項目 | 実測 |
+|---|---|
+| `input[type="file"]` | モーダル内に **`accept="text/csv"` のものが1つだけ**。曖昧にならない |
+| 待つテキスト | **「問題が作成されます。」**（「アップロード完了」ではない）。`成功アラート` のラベルが付いた dialog に出る |
+| 閉じるボタン | **`exact: true` が必須。** 付けないと `img "モーダルダイアログを閉じる"` にも部分一致して strict mode violation になる |
+| 所要時間 | 60問で10秒前後 |
+| テンプレート版 | ダイアログのリンクは `PracticeTestBulkQuestionUploadTemplate_V2.2.csv`。ヘッダー17列は v2 と完全一致 |
+
+### `browser_run_code_unsafe` は `async () => { ... }` で渡す
+
+**トップレベルの文を受け付けない。** `const x = ...` や `await page...` から
+始めると `SyntaxError: Unexpected token 'const'` / `Unexpected identifier 'page'`
+になる。上のように**アロー関数1つ**として渡す。`setInputFiles` を使う以上
+必ず通る道なので、最初からこの形で書く。
 
 ## 既存テストの問題を入れ替える場合
 
 **重要:** Udemy API は**公開済みテストの個別問題の削除・編集ができない**。`is_draft: true` や `is_published: false` を PATCH しても、問題操作 API は400を返す。
 
-### 正解の手順: テスト自体を削除→再作成
+### まず「何問直すのか」で分ける
+
+| 直す範囲 | 手順 |
+|---|---|
+| **1〜数問の一部（選択肢の文面・解説・ドメイン）** | **UI で直接編集する。削除は不要** |
+| 問題の追加・削除、大量の差し替え | テスト自体を削除→再作成（下記） |
+
+**API が編集できないのは API 経由の話で、UI の問題エディタは編集できる。**
+削除→再作成は 60 問すべてを作り直すことになるので、部分修正には使わない。
+
+```
+1. 問題一覧の tab "N. 問題文…" をクリックして当該問題を開く
+2. リッチテキスト欄を fill する
+   - 選択肢:     textbox "回答を追加" の nth(k)
+   - 選択肢の解説: textbox "学習者に回答を説明" の nth(k)
+   - 全体解説:   最後の textbox "学習者に回答を説明"
+3. button "質問を保存" をクリック
+   ★ 演習テスト設定の button "保存" とは別のボタン。混同すると保存されない
+4. リロードして innerText を読み直して反映を確認する
+```
+
+> 実績: 投入後に1問の選択肢1つだけを直す必要が出た。削除→再作成なら 60 問の
+> 再投入だが、UI 編集なら2つの欄と1クリックで済み、他の 59 問に触らずに終わった。
+> CSV 側（Source of Truth）も同じ内容に直してから検証スクリプトを通し直すこと。
+
+### テスト自体を削除→再作成する手順
 
 `browser_evaluate` 経由で以下を実行する。
 
@@ -145,7 +239,10 @@ await fetch(`/api-2.0/courses/${courseId}/quizzes/${quizId}/`, {
 | 演習テストを追加できない | コースが無料設定 | 先に有料設定にする |
 | 7本目を追加できない | 演習テストは最大6本 | 仕様。本数を6以下にする |
 | ファイル選択ダイアログが開かない | Modal state が違う | `browser_snapshot` で状態確認、UI操作からやり直し |
-| クリックできない要素 | ラベルに遮られている | 親の generic 要素をクリック |
+| クリックできない要素 | `ud-sr-only` の input がラベルに遮られている | input の `id` を読んで `label[for="<id>"]` を押す（親 generic は当たらないページがある） |
+| `does not handle the modal state` で全ツールが失敗 | ファイル選択ダイアログが滞留している | ページを再ナビゲートして解消する。以後はボタンを押さず `setInputFiles` を使う |
+| `Ref ... not found` | 保存や再描画で ref が採番し直された | snapshot を取り直す。設定欄は `input[type="number"]` の nth で取る |
+| 投入後に選択肢の一部が消えている | `<単語>` 形がサニタイザで削除された | `validate_quiz_csv.py` を通す（タグ検査が FAIL にする）。[[quiz-csv-format]] 厳守ルール9 |
 
 ## ペアになるスキル
 

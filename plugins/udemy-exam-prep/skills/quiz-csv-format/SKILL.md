@@ -44,6 +44,21 @@ Question,Question Type,Answer Option 1,Explanation 1,Answer Option 2,Explanation
 5. **BOM を含めない** — `utf-8` で保存（`utf-8-sig` で書くと Udemy がヘッダー不正と判定する）
 6. **改行を含むセルは `"` で囲む / ダブルクォートは `""` にエスケープ** — Python の `csv.writer` を使えば自動処理される
 7. **日本語カンマ `、` は問題ない** — 半角カンマがセル内に含まれる場合のみクォート必要
+8. **セル内に改行を書かない** — csv としては正しく引用されるので他の検査は通るが、Udemy の一括取り込みで破損要因になる。1セル1行で書く
+9. **`<単語>` 形の文字列を書かない** — `<role>` `<context>` `</example>` `<br/>` のような形は **Udemy のサニタイザが HTML タグと判定して中身ごと削除する**。XML タグに言及したいときは**括弧を外して名前だけ書く**
+
+```
+NG  Wrap the request in <role>, <context>, and <output> tags
+OK  Wrap the request in role, context, and output XML tags
+NG  <role>、<context>、<output>タグでその依頼を包む
+OK  role、context、outputのXMLタグでその依頼を包む
+```
+
+> 実績: 上の NG がそのまま投入され、Udemy 上で
+> `Wrap the request in , , and tags` になった。**選択肢の意味が消えて解けない問題になり、
+> 一括アップロードは成功アラートを出したので投入時には気づけなかった。**
+> CSV の中身は完全に正しいため、列数・正解番号・改行・文体のどの検査も通っていた。
+> `a < b` や `->` のような比較・矢印は対象外（検査は `<単語>` 形だけに当たる）。
 
 ## 必須検証
 

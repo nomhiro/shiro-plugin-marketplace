@@ -136,3 +136,35 @@ def test_carriage_return_in_cell_is_an_error(tmp_path):
 
 def test_single_line_cells_pass(tmp_path):
     assert validate_csv(build(tmp_path, [base_row()])) == []
+
+
+def test_angle_bracket_tags_are_an_error(tmp_path):
+    """`<単語>` 形は Udemy のサニタイザが中身ごと消すので落とす。
+
+    CSV としては何もおかしくないため、列数・正解番号・改行の検査は
+    すべて通る。実績: `Wrap the request in <role>, <context>, and <output>
+    tags` が投入後に `Wrap the request in , , and tags` になり、
+    選択肢が解けない文になった。
+    """
+    r = base_row()
+    r[8] = "Wrap the request in <role>, <context>, and <output> tags"
+    errors = validate_csv(build(tmp_path, [r]))
+    assert any("tag-like text" in e for e in errors)
+    assert any("Answer Option 4" in e for e in errors)
+    assert any("<role>" in e and "<context>" in e and "<output>" in e
+               for e in errors)
+
+
+def test_closing_and_self_closing_tags_are_caught(tmp_path):
+    r = base_row()
+    r[15] = "See </example> and <br/> in the draft"
+    errors = validate_csv(build(tmp_path, [r]))
+    assert any("tag-like text" in e for e in errors)
+
+
+def test_comparisons_and_arrows_are_not_flagged_as_tags(tmp_path):
+    """`a < b` や `->` を誤検知しないこと（比較や矢印は正当な本文）。"""
+    r = base_row()
+    r[0] = "If latency < 200 ms and cost > budget, what applies? A -> B"
+    r[15] = "Correct: 3 < 5 and 10 > 2. Source: https://example.com"
+    assert validate_csv(build(tmp_path, [r])) == []

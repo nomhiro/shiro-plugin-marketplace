@@ -6,6 +6,7 @@ CSV の読み書きは harness 全体でこのモジュールの read_rows / wri
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -48,6 +49,10 @@ def write_rows(path, rows: list[list[str]]) -> None:
 
 # セル内改行の検出用（バックスラッシュ表記を避けて chr で定義）
 NEWLINE_CHARS = (chr(10), chr(13))
+
+# HTML タグに見える文字列の検出用。`<word>` `<word/>` `</word>` だけに当てる
+# （`a < b` や `=>` のような比較・矢印は拾わない）。
+HTML_TAG_RE = re.compile(r"<[A-Za-z_][A-Za-z0-9_-]*\s*/?>|</[A-Za-z_][A-Za-z0-9_-]*>")
 
 
 def correct_indices(cell: str) -> list[str]:
@@ -92,6 +97,23 @@ def validate_csv(path) -> list[str]:
                 errors.append(
                     f"Row {i} col {ci} ({HEADER[ci - 1]}): contains an in-cell "
                     "newline - write the cell on one line"
+                )
+
+            # `<role>` のような `<単語>` 形の文字列は Udemy のサニタイザが
+            # HTML タグと判定して**中身ごと削除する**。CSV としては何も
+            # おかしくないので他のどの検査も通るが、投入後に選択肢の意味が
+            # 消える。実績: ある講座で
+            #   `Wrap the request in <role>, <context>, and <output> tags`
+            # が `Wrap the request in , , and tags` になり、選択肢が
+            # 解けない文になった（Explanation 側も同様に消えた）。
+            # XML タグに言及したいときは括弧を外して
+            # `role, context, and output XML tags` と書く。
+            tags = sorted(set(HTML_TAG_RE.findall(cell)))
+            if tags:
+                errors.append(
+                    f"Row {i} col {ci} ({HEADER[ci - 1]}): contains tag-like "
+                    f"text {' '.join(tags)} - Udemy strips it on upload; "
+                    "name the tags without angle brackets"
                 )
 
         nopt = sum(1 for opt, _ in OPTION_PAIRS if row[opt].strip())
