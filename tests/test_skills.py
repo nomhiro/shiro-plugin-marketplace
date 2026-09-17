@@ -119,3 +119,50 @@ def test_skills_do_not_press_publish():
     for skill in ("create-udemy-course", "upload-practice-tests"):
         text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
         assert "公開ボタンは押さない" in text, skill
+
+
+# --- 実測で踏んだ罠がスキルに残っているか ----------------------------------
+#
+# どれも「①②の検査を通ったのに成果物が壊れる」型の事故。散文が消えると
+# 次の資格で同じ事故をやり直すので、要点の在処をテストで固定する。
+
+def _skill(name):
+    return (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_create_section_generates_the_style_contract_before_authoring():
+    text = _skill("create-section")
+    assert "--print-contract" in text
+    assert "散文で書き写さない" in text
+
+
+def test_create_section_makes_the_ownership_table_a_phase_1a_deliverable():
+    assert "AUTHORING-GUARDRAILS.md" in _skill("create-section")
+    assert "論点の所有表" in _skill("create-section")
+
+
+def test_create_section_verifies_part_files_instead_of_trusting_reports():
+    text = _skill("create-section")
+    assert "完了報告を成果物の存在の根拠にしない" in text
+    assert "1回置いてから再確認" in text
+
+
+def test_upload_warns_that_the_question_list_renders_late():
+    """reload 直後の0件を失敗と誤認すると、成功したテストを作り直す事故になる。"""
+    text = _skill("upload-practice-tests")
+    assert "期待件数に達するまで" in text
+
+
+def test_upload_keeps_a_working_locator_for_the_add_question_button():
+    assert 'aria-label="質問を追加"' in _skill("upload-practice-tests")
+
+
+def test_course_messages_have_a_documented_length_limit():
+    """字数超過は成功アラートを出しながら黙って破棄される。"""
+    text = _skill("create-udemy-course")
+    assert "1,000字" in text
+    assert "残り字数" in text
+
+
+def test_snapshot_filename_must_stay_inside_the_allowed_roots():
+    assert "allowed roots" in _skill("create-udemy-course")

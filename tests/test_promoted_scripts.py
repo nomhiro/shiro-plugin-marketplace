@@ -11,11 +11,15 @@ from pathlib import Path
 import pytest
 
 from scripts.check_sources import check, load_policy
-from scripts.merge_parts import read_meta
+from scripts.merge_parts import head_mismatches, merge, read_meta
 from scripts.profile import forbidden_sources, guide_citation, source_titles
 from scripts.validate_quiz_csv import HEADER, write_rows
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "plugins" / "udemy-exam-prep" / "scripts"
+
+# タブ区切り meta を組むときのエスケープ事故を避けるため定数で持つ
+TAB = chr(9)
+NL = chr(10)
 
 PROMOTED = (
     "merge_parts.py", "finalize_section.py", "check_sources.py",
@@ -145,3 +149,124 @@ def test_read_meta_rejects_too_few_columns(tmp_path):
     p.write_text("1\tD1\t1.1\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit):
         read_meta(p)
+
+
+# --- merge_parts: meta の head と CSV の突き合わせ --------------------------
+#
+# 長さバイアスの是正や創作識別子のリネームで CSV を外科的に直すと、meta の
+# head だけが古くなる（実績: ある講座で5本13ファイル）。head は CSV を正とし、
+# ずれ（行の対応が壊れている）と古さ（編集されただけ）を区別して報告する。
+
+def _body(*heads):
+    out = []
+    for h in heads:
+        r = row()
+        r[0] = h
+        out.append(r)
+    return out
+
+
+def _meta(*heads):
+    return [
+        {"local_no": str(i), "domain": "D1", "task_statement": "1.1",
+         "tested_concept": f"概念{i}", "scenario": "S1", "head": h}
+        for i, h in enumerate(heads, 1)
+    ]
+
+
+def test_head_mismatches_is_quiet_when_meta_matches():
+    body = _body("A bank's agent calls lookup_order first.", "A hospital pipeline extracts labs.")
+    meta = _meta("A bank's agent calls lookup_order", "A hospital pipeline extracts")
+    assert head_mismatches(body, meta) == ([], [])
+
+
+def test_head_mismatches_tolerates_whitespace_and_case_and_ellipsis():
+    """エージェントは冒頭を手で写すので揺れる。揺れでは警告しない。"""
+    body = _body("A  Bank's Agent   calls lookup_order first.")
+    meta = _meta("a bank's agent calls lookup_order...")
+    assert head_mismatches(body, meta) == ([], [])
+
+
+def test_head_mismatches_reports_a_stale_head_as_a_warning():
+    """CSV だけ直した状態。CSV を採用するが、同じ行の概念も古い疑いを残す。"""
+    body = _body("A bank's agent calls fetch_order first.")
+    meta = _meta("A bank's agent calls lookup_order")
+    misaligned, stale = head_mismatches(body, meta)
+    assert misaligned == []
+    assert len(stale) == 1
+    assert "1 行目" in stale[0]
+
+
+def test_head_mismatches_reports_a_row_shift_as_a_failure():
+    """meta が1行ずれると tested_concept が別の問題に紐づく。致命的。"""
+    body = _body("QUESTION ONE about tools.", "QUESTION TWO about retrieval.")
+    meta = _meta("QUESTION TWO about retrieval", "QUESTION ONE about tools")
+    misaligned, stale = head_mismatches(body, meta)
+    assert len(misaligned) == 2
+    assert "行がずれている" in misaligned[0]
+    assert stale == []
+
+
+def test_head_mismatches_ignores_an_empty_head():
+    body = _body("Anything at all.")
+    assert head_mismatches(body, _meta("")) == ([], [])
+
+
+# --- merge() 本体への配線（head は CSV を正とする / ずれは止める） ----------
+
+MERGE_PROFILE = {
+    "mode": "mock-exam",
+    "mock_exams": 1,
+    "questions_per_exam": 2,
+    "domains": [{"id": "D1", "name": "Domain 1", "ratio": "100%", "per_exam": 2}],
+}
+
+
+def _build_part(section, csv_heads, meta_heads):
+    parts = section / "_parts"
+    parts.mkdir(parents=True, exist_ok=True)
+    write_rows(parts / "D1.csv", [list(HEADER)] + _body(*csv_heads))
+    rows = [
+        TAB.join([str(i), "D1", "1.1", f"概念{i}", "S1", h])
+        for i, h in enumerate(meta_heads, 1)
+    ]
+    (parts / "D1-meta.tsv").write_text(
+        NL.join(rows) + NL, encoding="utf-8", newline=NL,
+    )
+    return section
+
+
+def test_merge_takes_the_question_head_from_the_csv_not_the_meta(tmp_path):
+    """CSV を外科的に直しても question-bank の問題文が実物と一致する。"""
+    section = _build_part(
+        tmp_path / "section01-mock-exam-1",
+        ["RENAMED calls fetch_order now.", "Second question stands."],
+        ["OLD calls lookup_order now.", "Second question stands"],
+    )
+    result = merge(section, MERGE_PROFILE, keep_parts=True)
+    bank = Path(result["bank_rows"]).read_text(encoding="utf-8")
+    assert "RENAMED calls fetch_order now." in bank
+    assert "lookup_order" not in bank
+    assert len(result["warnings"]) == 1
+
+
+def test_merge_stops_when_the_meta_rows_are_shifted(tmp_path):
+    """tested_concept が別の問題に紐づく破損。通してはいけない。"""
+    section = _build_part(
+        tmp_path / "section01-mock-exam-1",
+        ["QUESTION ONE about tools.", "QUESTION TWO about retrieval."],
+        ["QUESTION TWO about retrieval", "QUESTION ONE about tools"],
+    )
+    with pytest.raises(SystemExit):
+        merge(section, MERGE_PROFILE, keep_parts=True)
+
+
+def test_merge_is_quiet_on_a_clean_section(tmp_path):
+    section = _build_part(
+        tmp_path / "section01-mock-exam-1",
+        ["QUESTION ONE about tools.", "QUESTION TWO about retrieval."],
+        ["QUESTION ONE about tools", "QUESTION TWO about retrieval"],
+    )
+    result = merge(section, MERGE_PROFILE, keep_parts=True)
+    assert result["warnings"] == []
+    assert result["total"] == 2
