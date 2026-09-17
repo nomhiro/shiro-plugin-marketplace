@@ -118,3 +118,48 @@ def test_expanded_sections_md_is_valid_in_mixed_mode(tmp_path):
     errs = validate_profile(profile)
     assert any("domains" in e for e in errs), errs
     assert not any("mode" in e for e in errs), errs
+
+
+# --- 展開された雛形が「作問の前に埋めるべき穴」を明示しているか -------------
+#
+# 実績: ブリーフに機械検査される書式が1つも書かれておらず、6本378問が
+# 全滅しかけた。ガードレールの所有表も雛形に節が無く、4本目で必要になって
+# から遡って作った。どちらも雛形に差し込み口が無かったことが原因。
+
+def test_brief_has_a_slot_for_the_machine_checked_style_contract(tmp_path):
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "AUTHOR-BRIEF.md").read_text(encoding="utf-8")
+    assert "5-1" in text
+    assert "--print-contract" in text, "契約の生成コマンドが書かれていない"
+    assert "（未生成）" in text, "未生成であることが作問者に見えない"
+
+
+def test_brief_self_check_runs_the_style_checker(tmp_path):
+    """check_style.py を自己チェックから外すと、書式のずれが全問に乗って発覚する。"""
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "AUTHOR-BRIEF.md").read_text(encoding="utf-8")
+    assert "check_style.py" in text
+
+
+def test_brief_forbids_re_delegation(tmp_path):
+    """作問エージェントが fork へ委譲すると、停止しても親から見えない。"""
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "AUTHOR-BRIEF.md").read_text(encoding="utf-8")
+    assert "再委譲" in text
+
+
+def test_guardrails_have_a_topic_ownership_table(tmp_path):
+    """数値事実の重複はどの文面照合でも捕まらない。所有表だけが防げる。"""
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "research" / "AUTHORING-GUARDRAILS.md").read_text(encoding="utf-8")
+    assert "## K. 論点の所有表" in text
+    assert "所有ドメイン" in text
+
+
+def test_guardrails_name_the_duplications_that_pass_every_check(tmp_path):
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "research" / "AUTHORING-GUARDRAILS.md").read_text(encoding="utf-8")
+    assert "K-2" in text
+    # 再利用が許容される4条件がそろっているか
+    for cond in ("max_per_concept", "シナリオ", "構造から違う", "症状"):
+        assert cond in text, cond

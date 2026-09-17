@@ -8,6 +8,13 @@ question-author を D1〜D5 で並列に走らせると、同じ quiz.csv への
 - 通し番号（Q1..QN）はここで振る
 - question-bank.md に追記する行もここで生成する（exam-validator が使う）
 
+**question-bank の問題文は meta ではなく CSV から取る。** 長さバイアスの是正や
+創作識別子のリネームで CSV を外科的に直すと meta の `head` だけが古くなり、
+重複管理のインデックスが実物と食い違う（実績: ある講座で5本13ファイルが古くなった）。
+CSV を正とし、meta が食い違ったら報告する。**meta の head が別の行の問題文に
+一致する場合は行のずれ**で、`tested_concept` が別の問題に紐づく致命的な破損なので
+FAIL にする。
+
 使い方:
     python tools/merge_parts.py section01-mock-exam-1
     python tools/merge_parts.py section01-mock-exam-1 --keep-parts
@@ -15,6 +22,7 @@ question-author を D1〜D5 で並列に走らせると、同じ quiz.csv への
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -55,6 +63,42 @@ def read_meta(path: Path) -> list[dict]:
     return rows
 
 
+def _norm_head(text: str) -> str:
+    """head の比較用に正規化する。
+
+    エージェントは冒頭何字かを手で写すため、空白の入り方・大文字小文字・
+    末尾の省略記号が揺れる。揺れで誤検出しないところまで落とす。
+    """
+    t = re.sub(r"\s+", "", text).lower().replace("|", "/")
+    return t.rstrip(".…。")
+
+
+def head_mismatches(body: list[list[str]], meta: list[dict]) -> tuple[list[str], list[str]]:
+    """meta の head と CSV の問題文を突き合わせる。
+
+    戻り値は (行のずれ, 古いだけ)。ずれは FAIL、古いだけなら CSV を採用して WARN。
+    """
+    csv_heads = [_norm_head(r[0]) for r in body]
+    misaligned: list[str] = []
+    stale: list[str] = []
+    for i, m in enumerate(meta, 1):
+        want = _norm_head(m.get("head") or "")
+        if not want or csv_heads[i - 1].startswith(want):
+            continue
+        j = next((k + 1 for k, h in enumerate(csv_heads) if h.startswith(want)), None)
+        if j is not None:
+            misaligned.append(
+                f"meta {i} 行目の head が CSV {j} 行目の問題文に一致する"
+                "（行がずれている。tested_concept が別の問題に紐づく）"
+            )
+        else:
+            stale.append(
+                f"meta {i} 行目の head が CSV の問題文と一致しない"
+                f"（CSV を採用: {body[i - 1][0][:40]}...）"
+            )
+    return misaligned, stale
+
+
 def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
     parts_dir = section / "_parts"
     if not parts_dir.is_dir():
@@ -68,6 +112,7 @@ def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
     merged: list[list[str]] = [list(HEADER)]
     bank: list[str] = []
     per_domain: dict[str, int] = {}
+    warnings: list[str] = []
     global_no = 0
 
     for did in quota:                      # front matter の domains 順
@@ -96,6 +141,16 @@ def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
                 f"{did}: {len(body)} 問だがノルマは {quota[did]} 問"
             )
 
+        misaligned, stale = head_mismatches(body, meta)
+        if misaligned:
+            print(f"FAIL {meta_path}: meta と CSV の行がずれている")
+            for e in misaligned[:10]:
+                print(f"  - {e}")
+            raise SystemExit(1)
+        for e in stale:
+            print(f"WARN {meta_path}: {e}")
+            warnings.append(f"{did}: {e}")
+
         want = names[did]
         for i, row in enumerate(body):
             if row[16].strip() != want:
@@ -107,7 +162,8 @@ def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
         for row, m in zip(body, meta):
             global_no += 1
             merged.append(row)
-            head = (m["head"] or row[0])[:60].replace("|", "/")
+            # CSV を正とする（meta の head は外科的修正に追随しない）
+            head = row[0][:60].replace("|", "/")
             bank.append(
                 f"| {section.name[:9]} | Q{global_no} | {did} | "
                 f"{m['task_statement']} | {m['tested_concept'].replace('|', '/')} | "
@@ -134,7 +190,8 @@ def merge(section: Path, profile: dict, keep_parts: bool) -> dict:
         for p in sorted(parts_dir.glob("*-meta.tsv")):
             p.unlink()
 
-    return {"total": global_no, "per_domain": per_domain, "bank_rows": str(bank_out)}
+    return {"total": global_no, "per_domain": per_domain,
+            "bank_rows": str(bank_out), "warnings": warnings}
 
 
 def main(argv: list[str]) -> int:
@@ -155,6 +212,11 @@ def main(argv: list[str]) -> int:
     for did, n in result["per_domain"].items():
         print(f"  {did}: {n}")
     print(f"  question-bank 追記用の行: {result['bank_rows']}")
+    if result["warnings"]:
+        print(
+            f"  WARN {len(result['warnings'])} 件: meta.tsv の head が CSV と食い違う。"
+            "CSV を採用したが、同じ行の tested_concept も古い可能性がある"
+        )
     return 0
 
 

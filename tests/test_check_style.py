@@ -1,4 +1,4 @@
-from scripts.check_style import check_rows, load_style
+from scripts.check_style import check_rows, contract_text, load_style
 from scripts.validate_quiz_csv import HEADER
 
 STYLE = {
@@ -155,3 +155,48 @@ def test_load_style_reads_the_block(tmp_path):
     style = load_style(p)
     assert style["explanation_markers"]["correct"] == "正解です。"
     assert style["require_space_after_source_url"] is True
+
+
+# --- --print-contract: 契約の定義元を検査と共有する ------------------------
+#
+# ブリーフに散文で書き写すと、検査側とブリーフ側がずれて「基準どおりに書いた
+# つもりの問題」が担当ドメインごと全滅する（実績: 作問直前に発覚）。
+# 契約文は front matter の style から生成する。
+
+def test_contract_names_every_machine_checked_marker():
+    t = contract_text(STYLE)
+    for marker in ("正解です。", "不正解。", "【訳】", "【設問の訳】"):
+        assert marker in t, marker
+
+
+def test_contract_states_both_sentence_style_rules():
+    t = contract_text(STYLE)
+    assert STYLE["body_sentence_end"] in t
+    assert "一致させる" in t
+    assert "一致させない" in t
+
+
+def test_contract_mentions_the_space_after_the_source_url():
+    assert "半角スペース" in contract_text(STYLE)
+
+
+def test_contract_omits_rules_that_are_switched_off():
+    style = {k: v for k, v in STYLE.items() if k != "require_space_after_source_url"}
+    style.pop("question_translation_marker")
+    t = contract_text(style)
+    assert "半角スペース" not in t
+    assert "【設問の訳】" not in t
+    assert "【訳】" in t          # 残したものは消えない
+
+
+def test_contract_says_so_when_no_style_is_configured():
+    t = contract_text({})
+    assert "style" in t
+    assert "ありません" in t
+
+
+def test_contract_is_safe_to_paste_into_the_brief():
+    """ブリーフは Markdown なので、見出しと自己チェックのコマンドを含む。"""
+    t = contract_text(STYLE)
+    assert t.startswith("### ")
+    assert "check_style.py" in t

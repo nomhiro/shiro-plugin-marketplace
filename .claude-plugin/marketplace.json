@@ -7,14 +7,14 @@
   },
   "metadata": {
     "description": "nomhiro's Claude Code plugins",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "plugins": [
     {
       "name": "udemy-exam-prep",
       "source": "./plugins/udemy-exam-prep",
       "description": "認定資格の試験対策問題集（Udemy 演習テスト講座）を、公式ドキュメント調査からフル模試生成・Udemy へのアップロードまで一貫して作成するハーネス",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "author": { "name": "nomhiro" },
       "homepage": "https://github.com/nomhiro/shiro-plugin-marketplace",
       "repository": "https://github.com/nomhiro/shiro-plugin-marketplace",
