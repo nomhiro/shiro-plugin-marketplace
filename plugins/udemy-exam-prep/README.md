@@ -1,6 +1,6 @@
 # udemy-exam-prep
 
-認定資格の試験対策問題集（Udemy 演習テスト講座）を作るハーネス。公式ドキュメントの調査から、本番相当フル模試の生成・検証、Udemy へのアップロードまでを、スキル8個・サブエージェント3個・検証スクリプト6本で自動化します。
+認定資格の試験対策問題集（Udemy 演習テスト講座）を作るハーネス。公式ドキュメントの調査から、本番相当フル模試の生成・検証、Udemy へのアップロードまでを、スキル8個・サブエージェント3個・検証スクリプト8本で自動化します。
 
 資格固有の情報は **プロジェクト側 `sections.md` の YAML front matter だけ** が持ちます。ハーネス自体は資格非依存なので、同じプラグインを任意のベンダー・任意の資格に使えます。
 
@@ -78,7 +78,7 @@ exam_code: CCAR-F                           # 任意。公式の試験コード
 vendor: anthropic                           # 必須。anthropic/microsoft/github/cloudflare/ipa/generic
 credential_url: https://...                 # 任意
 study_guide: https://...                    # 必須。ブループリント抽出元
-mode: mock-exam                             # 必須。現状 mock-exam のみ
+mode: mock-exam                             # 必須。mock-exam / mixed
 exam:
   minutes: 120                              # 必須。Udemy の制限時間になる
   pass_score: 720                           # 必須
@@ -103,6 +103,32 @@ domains:                                    # 必須。create-sections が確定
 ---
 ```
 
+### `mode: mixed` — 本ごとに問題数と配分が違う構成
+
+本番が大問題数の試験では「分野別演習でドメインを絞って深く → フル模試で横断」の
+段階構成が有効になる。その場合 `sections` が**本ごとの Source of Truth** になる。
+
+```yaml
+mode: mixed
+questions_per_exam: 145        # フル模試1本の問題数（domains[].per_exam の合計）
+sections:
+  - slug: section01-drill-1    # フォルダ名そのもの
+    title: 分野別演習① 基礎
+    kind: drill                # drill=分野別演習 / mock=本番相当
+    questions: 130
+    minutes: 110
+    domains: {D1: 70, D3: 60}  # 合計が questions と一致すること
+  - slug: section04-mock-exam-1
+    kind: mock
+    questions: 145
+    minutes: 100
+    # domains 省略 = 全ドメイン横断（domains[].per_exam を使う）
+```
+
+`domain_quota(profile, "<slug>")` が本ごとのノルマを返す。**front matter を目で読んで
+写さず、必ずスクリプトの出力を使う。** `mock-exam` モードも `section_specs()` が
+同じ形で返すので、呼び出し側は mode を気にしなくてよい。
+
 ### 検証ルール
 
 処理開始前に次を検証し、違反時は**推測で続行せず明示エラーで停止**します。
@@ -110,8 +136,10 @@ domains:                                    # 必須。create-sections が確定
 1. 必須キーの存在
 2. `sum(domains[].per_exam) == questions_per_exam`
 3. `domains[].id` の一意性
-4. `mode == "mock-exam"`
+4. `mode` が `mock-exam` / `mixed` のいずれか
 5. `mock_exams >= 1` かつ `questions_per_exam >= 1`
+6. `mode: mixed` なら `sections` が存在し、各本の `domains` の合計が
+   その本の `questions` と一致し、`domains[].id` が実在すること
 
 ## 対応ベンダーと調査レシピ
 
@@ -155,6 +183,13 @@ python scripts/shuffle_options.py section01-mock-exam-1/quiz.csv
 # ドメイン配分・シラバス整合・本横断重複の検証
 python scripts/validate_exam.py --sections sections.md \
   --bank question-bank.md section0*/quiz.csv
+
+# あるキーワードが過去にどう問われたか（作問前に必ず見る）
+python scripts/find_in_books.py オープン・イノベーション
+python scripts/find_in_books.py Actor-Critic --answers-only
+
+# ユーザー指定の必須収録が実際に入っているか（screening）
+python scripts/check_must_include.py research/must-include.md
 ```
 
 CSV の読み書きは `scripts/validate_quiz_csv.py` の `read_rows` / `write_rows` を使います（`utf-8` / BOM 無し / `newline=''` / `QUOTE_MINIMAL` が保証されます）。
@@ -172,6 +207,14 @@ CSV の読み書きは `scripts/validate_quiz_csv.py` の `read_rows` / `write_r
 **長さバイアスはシャッフルでは消えない。** LLM は正解肢に根拠や仕組みの説明を書き込むため、正解が一貫して長くなります（実績: 45問で正解肢が2位の選択肢を平均 +29%・最大 +111% 上回っていた）。受講者が内容を読まずに「長いものを選ぶ」だけで正解できてしまう攻略可能な欠陥で、位置を変えても長さは付いてくるのでシャッフルでは解消できません。`check_option_balance.py` を**内容修正が可能なシャッフル前**の品質ゲートとして通します。
 
 判定は **margin**（正解肢が2位の選択肢をどれだけ上回るか）で行います。「最長かどうか」の二値では、長さがほぼ揃った問題の統計的な同着まで欠陥として報告してしまいます（実測: 正解長が他の 1.03 倍でも 71% が「最長」になる）。受講者が知覚できるのは差の大きさなので margin で測り、1問ごとに +20% 以内、平均で +8% 以内、超過問題の割合 15% 以内を基準にします。
+
+**multi-select も検査します。** 旧版は `multiple-choice` 以外を丸ごとスキップしていたため、multi-select の長さバイアスが無検査で通っていました（実績: ある講座の multi-select 42問のうち14問で正解肢がすべて最長、うち4問は「長い順に2つ選ぶ」だけで当たる本物の欠陥）。multi-select は**最も短い正解肢が最も長い誤答肢をどれだけ上回るか**で測ります。
+
+**短い選択肢だけの問題は散らばりを免除します。** 用語名を裸で並べた形（本番でよくある）は散らばりが大きく出ますが、長い術語を選んでも正解にはならないので攻略可能性はありません。免除しないと悪化を招きます（実績: この停止を通すために作問エージェントが `FCN(モデル)` のような**意味のないタグで字数を稼いだ**のが20件）。代わりに**字数稼ぎタグそのものを検出**します。
+
+**「URL は無いが出典はある」の判定を front matter から作ります。** `guide_citation` は資格ごとに表記が違う（`公式 Exam Guide（CODE）` / `JDLA 公式シラバス（…）`）ため、決め打ちの文字列で探すと別表記の資格でシラバス引用の問題が丸ごと「出典がない」と誤検出されます（実績: ある講座で約100件）。`check_sources.py` と `audit_course.py` は同じ `guide_pattern()` を使います。
+
+**question-bank は追記ではなく貼り替えます。** 旧版は「既に追記済みならスキップ」でしたが、どちらの分岐も再実行で壊れました。スキップする側は確定後に問題を差し替えても**古い `tested_concept` が残り**、追記する側は判定を取りこぼすと**同じセクションの行が二重に入って**概念の再利用回数が倍になります。`refresh_bank()` はそのセクションの行を同じ位置で置き換えるので、何回実行しても結果が同じです。
 
 **URL 正規化はホスト別の許可リスト方式。** ロケールがホスト直後の第1パスセグメントにあるサイト（`docs.claude.com/en/docs/...`）だけを書き換え、ロケールが下位にあるサイト（`code.claude.com/docs/en/...`）と未知のホストは一切触りません。前者の規則を後者に当てると `code.claude.com/en/docs/en/...` と URL を壊すためです。
 

@@ -161,6 +161,53 @@ docs.claude.com       -> 実体ホスト（platform.claude.com / code.claude.com
 リッチテキスト欄は**黙って捨てられる**ので、事前走査が唯一の防御になる。
 実績: 学習目的に「CLAUDE.md 階層」と書いて goals の保存が HTTP 400 で失敗した。
 
+## ★ 長文は「クリップボード経由 + ハッシュ照合」で入れる
+
+**日本語の長文をツールの引数として渡すと、文字単位で化けることがある。**
+
+> 実績: 92文字のサブタイトルを `browser_fill_form` に渡したところ、
+> `模擬試験3本` が **`模擬試陳83本`** になって入力された。
+> 前後の文は正常で、1文字の置換＋1文字の挿入。
+> **これは販売ページに出る文字列**で、目視で読み返して初めて気づいた。
+
+販売ページ・コース説明・コースメッセージ・学習目標は**公開される文字列**なので、
+「入れたつもり」で進めてはいけない。次の2段構えにする。
+
+### 1. ツールの引数を通さずに渡す
+
+ローカルファイル → クリップボード → `Ctrl+V` で入れる。
+ツール呼び出しの JSON を一切通らないので、化ける経路が無い。
+
+```powershell
+Set-Clipboard -Value (Get-Content -Path .\desc.txt -Raw -Encoding UTF8)
+```
+
+対象欄にフォーカスしてから `Ctrl+V` を送る。
+
+> **maxlength のある欄に長文を貼ると黙って切られる。**
+> タイトル60字・学習目標160字などは制限があるので、
+> JSON のような長いデータを一時的に貼るなら**制限のない欄**を使う
+> （実績: 学習目標の欄に貼って 160 字で切られ、JSON が壊れた）。
+
+### 2. 入れた後にハッシュで照合する
+
+ページ側とローカル側で SHA256 の先頭16桁を比べる。
+**改行を除いて連結してから取る**と、リッチテキスト側の改行の扱いに影響されない。
+
+```javascript
+const ed = document.querySelector('div[contenteditable="true"]');
+const flat = ed.innerText.split('\n').filter(s => s.trim()).map(s => s.trim()).join('');
+const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(flat));
+[...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 16);
+```
+
+```python
+hashlib.sha256("".join(l.strip() for l in text.split("\n") if l.strip()).encode()).hexdigest()[:16]
+```
+
+**保存後にリロードして、もう一度照合する。** 入力時に一致していても
+保存されていないことがある（上記のコース画像と同じ）。
+
 ## 保存の確認（飛ばすと壊れる）
 
 **保存直後の「成功アラート」とサイドバーの「完了済み」を成功の根拠にしてはいけない。**
@@ -246,6 +293,29 @@ im.save('courseImage-udemy.jpg', 'JPEG', quality=90, optimize=True, progressive=
 - **JPEG 推奨**（写真風画像なら 80KB 前後に収まる）
 - PNG だと写真は数百KB〜数MBに膨らみアップロード失敗の原因になる
 - 元画像が RGBA の場合は `convert('RGB')` 必須（JPEG は alpha 非対応）
+
+#### ★ 「画像をトリミング」を押さないと保存されない
+
+**ファイルを選ぶだけでは保存されない。** アップロード自体は成功し
+「画像のアップロードに成功しました」と出るが、**ヘッダーの保存ボタンは無効のまま**で、
+リロードすると placeholder に戻る。
+
+> 実績: 2回アップロードして2回とも成功トーストが出たのに、
+> API で確認すると `image_750x422` が `.../placeholder.jpg` のままだった。
+
+手順:
+
+1. ファイルを選ぶ（成功トーストが出る）
+2. **「画像をトリミング」を押す** — これでフォームが dirty になり保存ボタンが有効化される
+3. 保存ボタンを押す
+4. **API で実際に入ったか確認する**（トーストを信用しない）
+
+```javascript
+const r = await fetch('/api-2.0/courses/<id>/?fields[course]=image_750x422',
+                      { credentials: 'include' });
+const j = await r.json();
+// placeholder.jpg を含んでいたら保存されていない
+```
 
 #### S3 multipart アップロードエラー対処
 

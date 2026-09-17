@@ -49,6 +49,22 @@ DEFAULT_GUIDE_RE = re.compile(r"Exam\s*Guide")
 UA = "Mozilla/5.0 (compatible; udemy-exam-prep-source-check/1.0)"
 
 
+def guide_pattern(profile: dict) -> re.Pattern:
+    """「URL は無いが出典はある」と認める表記のパターンを front matter から作る。
+
+    **決め打ちの文字列で探してはいけない。** `guide_citation` は資格ごとに違う
+    （`公式 Exam Guide（CODE）` / `JDLA 公式シラバス（…）` など）。
+    決め打ちにすると、別表記の資格でシラバス引用の問題が丸ごと
+    「出典がない」と誤検出される（実績: ある講座で約100件）。
+
+    audit_course.py もこれを使う（同じ規則を2箇所に持たせない）。
+    """
+    cite = guide_citation(profile)
+    # 「公式 Exam Guide（CODE）」のうち、記号を含まない語だけを緩く拾う
+    words = [re.escape(w) for w in re.findall(r"[^\s（）()]+", cite)][:2]
+    return re.compile(r"\s*".join(words)) if words else DEFAULT_GUIDE_RE
+
+
 def load_policy(sections_md) -> tuple[dict[str, str], re.Pattern]:
     """禁止ホストと Exam Guide 参照パターンを front matter から読む。
 
@@ -59,11 +75,7 @@ def load_policy(sections_md) -> tuple[dict[str, str], re.Pattern]:
         profile = load_profile(sections_md)
     except (ProfileError, FileNotFoundError, OSError):
         return {}, DEFAULT_GUIDE_RE
-    cite = guide_citation(profile)
-    # 「公式 Exam Guide（CODE）」のうち、記号を含まない語だけを緩く拾う
-    words = [re.escape(w) for w in re.findall(r"[^\s（）()]+", cite)][:2]
-    pat = re.compile(r"\s*".join(words)) if words else DEFAULT_GUIDE_RE
-    return forbidden_sources(profile), pat
+    return forbidden_sources(profile), guide_pattern(profile)
 
 
 def extract_urls(cell: str) -> list[str]:

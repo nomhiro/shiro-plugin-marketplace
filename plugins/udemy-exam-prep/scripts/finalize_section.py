@@ -61,6 +61,54 @@ def run(label: str, argv: list[str]) -> None:
         raise SystemExit(f"\n{label} で失敗しました（exit {proc.returncode}）。ここで停止します。")
 
 
+def refresh_bank(bank: Path, section: Path) -> tuple[int, int]:
+    """question-bank.md のそのセクションの行を、最新の bank-rows.md で置き換える。
+
+    **追記ではなく貼り替えにする理由。** 旧版は「既に追記済みならスキップ」だったが、
+    どちらの分岐も再実行で壊れる。
+
+    - スキップする側: 確定後に問題を差し替えると、bank には**古い
+      `tested_concept` と問題文冒頭が残り続ける**。横断の重複検査が
+      実在しない問題を見ていることになる
+    - 追記する側: 判定が `| section0N |` の有無なので、セクション名が
+      9文字で切られる運用だと取りこぼして**同じセクションの行が二重に入る**。
+      概念の再利用回数が倍になり「上限超過」の誤検出が出る
+
+    そこで**そのセクションの既存行を全部取り除き、同じ位置に新しい行を入れる**。
+    何回実行しても結果が同じになる。
+
+    戻り値は (取り除いた行数, 入れた行数)。
+    """
+    rows_md = (section / "_parts" / "bank-rows.md").read_text(encoding="utf-8")
+    new_rows = [l for l in rows_md.splitlines() if l.strip().startswith("|")]
+    prefix = section.name.split("-")[0]          # section01 など
+
+    def is_target(line: str) -> bool:
+        cells = line.split("|")
+        return (
+            len(cells) >= 3
+            and cells[1].strip() == prefix
+            and cells[2].strip().lstrip("Q").isdigit()
+        )
+
+    out: list[str] = []
+    removed = 0
+    inserted = False
+    for line in bank.read_text(encoding="utf-8").splitlines():
+        if is_target(line):
+            removed += 1
+            if not inserted:
+                out.extend(new_rows)
+                inserted = True
+            continue
+        out.append(line)
+    if not inserted:
+        out.extend(new_rows)
+
+    bank.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
+    return removed, len(new_rows)
+
+
 def report(section: Path, bank: Path) -> None:
     rows = read_rows(section / "quiz.csv")[1:]
     bank_rows = [
@@ -123,16 +171,12 @@ def main(argv: list[str]) -> int:
     run("6. ドメイン配分（question-bank 追記前）",
         [str(HERE / "validate_exam.py"), "--sections", a.sections, quiz])
 
-    print("\n--- 7. question-bank.md への追記 ---")
-    rows_md = (section / "_parts" / "bank-rows.md").read_text(encoding="utf-8")
-    existing = bank.read_text(encoding="utf-8")
-    already = f"| {section.name[:9]} |" in existing
-    if already:
-        print(f"{section.name[:9]} の行は既に追記済み。スキップします")
+    print("\n--- 7. question-bank.md の反映（貼り替え） ---")
+    removed, added = refresh_bank(bank, section)
+    if removed:
+        print(f"{section.name.split('-')[0]} の行を {removed} 行 → {added} 行に貼り替えました")
     else:
-        with open(bank, "a", encoding="utf-8", newline="\n") as f:
-            f.write(rows_md if rows_md.endswith("\n") else rows_md + "\n")
-        print(f"{len(rows_md.strip().splitlines())} 行を追記しました")
+        print(f"{added} 行を追加しました")
 
     run("8. 本横断の重複検証",
         [str(HERE / "validate_exam.py"), "--sections", a.sections,

@@ -39,6 +39,7 @@ if __package__ in (None, ""):
 
 
 from scripts._console import safe_stdout  # noqa: E402
+from scripts.check_sources import guide_pattern  # noqa: E402
 from scripts.profile import (  # noqa: E402
     domain_names, domain_quota, forbidden_sources, load_profile,
     section_specs,
@@ -319,10 +320,16 @@ def audit(profile: dict, bank_path: Path, check_urls: bool) -> tuple[list[str], 
     hosts: Counter[str] = Counter()
     urls: set[str] = set()
     no_source = 0
+    # **「URL は無いが出典はある」の判定を front matter から作る。**
+    # 旧版は `"公式 Exam Guide"` を決め打ちで探していたため、guide_citation を
+    # 別表記にしている資格（例: 公式シラバス）では**シラバス引用の問題すべてを
+    # 「出典がない」と誤検出**した（実績: ある講座で約100件）。
+    # check_sources.py と同じ規則に揃える。
+    guide_re = guide_pattern(profile)
     for p in paths:
         for i, r in enumerate(read_rows(p)[1:], 1):
             found = URL_RE.findall(r[15])
-            if not found and "公式 Exam Guide" not in r[15]:
+            if not found and not guide_re.search(r[15]):
                 no_source += 1
                 problems.append(f"{p.parent.name}/Q{i}: 出典がない")
             for u in found:

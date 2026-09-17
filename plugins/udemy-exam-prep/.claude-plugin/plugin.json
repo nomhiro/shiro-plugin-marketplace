@@ -1,7 +1,7 @@
 {
   "name": "udemy-exam-prep",
   "description": "認定資格の試験対策問題集（Udemy 演習テスト講座）を作成するハーネス。試験ブループリントの起草、公式ドキュメント調査、本番相当フル模試の生成・検証、Udemy へのアップロードまでをスキルとサブエージェントで自動化する",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": { "name": "nomhiro" },
   "homepage": "https://github.com/nomhiro/shiro-plugin-marketplace",
   "license": "MIT"

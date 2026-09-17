@@ -170,8 +170,58 @@ API DELETE 後もカリキュラムページにテスト枠が残ることがあ
 
 **審査提出と公開ボタンは押さない。** ここは人が判断する工程。
 
+### ★ 検証は API を第一手にする（snapshot 解析より確実）
+
+Udemy の内部 API はログイン済みのページから読める。**snapshot のテキスト解析より
+桁違いに正確**で、ドメイン配分や形式比率まで一撃で数えられる。
+
+```javascript
+// 1本の投入結果を集計する
+const r = await fetch('/api-2.0/quizzes/<quizId>/assessments/'
+  + '?page_size=200&fields[assessment]=section,assessment_type',
+  { credentials: 'include' });
+const j = await r.json();
+const byDomain = {}, byType = {};
+(j.results || []).forEach(a => {
+  byDomain[a.section] = (byDomain[a.section] || 0) + 1;
+  byType[a.assessment_type] = (byType[a.assessment_type] || 0) + 1;
+});
+({ total: j.count, byDomain, byType });
+```
+
+- `count` が期待問題数と一致するか
+- `section`（= CSV の `Domain` 列）の内訳が `sections.md` のノルマと一致するか
+- `assessment_type` の内訳が `question_types` の比率と一致するか
+
+1問の中身も API で読める。**選択肢別解説と全体解説の両方が入ることを確認する**
+（`prompt.feedbacks` と `prompt.explanation` の両方が埋まる。
+編集画面の「各回答選択肢の説明 / 質問全体に対する1つの説明」のラジオは
+手動作成用の設定で、一括アップロードには影響しない）。
+
+```javascript
+await fetch('/api-2.0/quizzes/<quizId>/assessments/?page_size=1'
+  + '&fields[assessment]=prompt,correct_response,section', { credentials: 'include' });
+```
+
+> **テストの設定値（時間・合格点・ランダム化）は API では読めない。**
+> `/api-2.0/quizzes/<id>/?fields[quiz]=...` は 404 を返す。
+> **編集画面のフォーム値を読む**のが確実（講師が見る値そのもの）。
+
+### ★ 演習テストは「末尾」ではなく「現在位置の下」に追加される
+
+6本を続けて追加すると**1本目が最後に来る**。
+
+> 実績: ①②③模試1模試2模試3 の順に作ったのに、
+> 並びが ②③模試1模試2模試3① になった。
+
+並べ替えのドラッグは jQuery 系で不確実なので、
+**タイトルを位置に合わせて付け替える**ほうが確実で検証もしやすい。
+どの quizId にどの CSV を入れるかは自分で決められるので、
+「位置 → 入れる CSV → 付けるタイトル」の対応表を先に作ってから進める。
+
 ### 投入結果は3段で検証する（件数だけでは足りない）
 
+API が使えない場合、または UI 上の見え方を確かめる場合はこちら。
 アップロードの「成功アラート」だけを根拠にしない。**リロードしてから**次の3つを見る。
 
 **① 件数と欠番** — 問題一覧は `tab "N. 問題文…"` として描画される。
