@@ -1,4 +1,4 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["plugins/udemy-exam-prep"]
+pythonpath = ["plugins/udemy-exam-prep", "plugins/udemy-video-course/scripts"]
 addopts = "-q"

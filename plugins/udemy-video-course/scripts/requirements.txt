@@ -1,0 +1,15 @@
+# make-lecture-movie スキルの Python 依存
+# Gemini-TTS (Cloud Text-to-Speech) の prompt / model_name 対応に必要
+google-cloud-texttospeech>=2.29.0
+# pptx → PDF → PNG のレンダリング（PDF を画像化）
+PyMuPDF>=1.24.0
+# スライド枚数の取得（PNG化前のセグメント計画・audio-only でも使用）
+python-pptx>=0.6.23
+# 映り込み点検（find_text_leak.py の正規化相互相関）と変化点検出（detect_events.py）
+numpy>=1.26
+scipy>=1.11
+Pillow>=10.0
+
+# 以下はシステム前提のため pip 対象外（参考）:
+#   - ffmpeg / ffprobe        : 動画合成・尺取得（PATH に必要）
+#   - LibreOffice (soffice)   : pptx → PDF 変換（PATH もしくは既定インストール先）

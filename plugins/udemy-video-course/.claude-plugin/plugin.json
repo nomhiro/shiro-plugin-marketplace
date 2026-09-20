@@ -1,0 +1,10 @@
+{
+  "name": "udemy-video-course",
+  "description": "動画講座（Udemy）のレクチャーを、スライドとナレーション台本からAI音声付きの動画にするハーネス。座学と実践（ハンズオン）の両方に対応し、実践は Claude 自身が画面を操作して素材を撮る収録モードを持つ。品質ゲート（TTS異常・沈黙率・文体・映り込み）と第三者レビューをパイプラインに組み込む",
+  "version": "0.1.0",
+  "author": {
+    "name": "nomhiro"
+  },
+  "homepage": "https://github.com/nomhiro/shiro-plugin-marketplace",
+  "license": "MIT"
+}
