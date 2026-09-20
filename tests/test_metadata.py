@@ -6,7 +6,7 @@ PLUGIN = REPO / "plugins" / "udemy-exam-prep"
 
 # リリースするバージョン。marketplace.json と plugin.json の両方に同じ値が
 # 入っていることを検証する（片方だけ上げる事故を落とすため、ここを唯一の定義元にする）
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 
 def _load(p):

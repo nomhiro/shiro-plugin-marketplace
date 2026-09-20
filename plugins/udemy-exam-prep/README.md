@@ -42,6 +42,11 @@ Phase 3    /udemy-exam-prep:upload-practice-tests
              ★ R4: CSV 検証 FAIL 時のみ ★
              ↓
 Phase 4    価格設定・審査提出・公開 — すべて人が行う（自動化対象外）
+             ↓
+Phase 5    /udemy-exam-prep:handle-student-feedback
+             → 公開後に受講者の指摘が来たとき。一次情報で検証 → 講座全体を見直し
+               → CSV 修正 → Udemy の編集画面で書き換え → 公開 → Q&A へ返信
+             ★ 公開と返信はユーザーの許可を得てから ★
 ```
 
 ## スキル
@@ -53,6 +58,7 @@ Phase 4    価格設定・審査提出・公開 — すべて人が行う（自�
 | `create-section` | `/udemy-exam-prep:create-section 2` | フル模試1本を生成・検証・シャッフル。**R2（初回）/ R3 で停止** |
 | `create-udemy-course` | `/udemy-exam-prep:create-udemy-course` | Udemy にコース作成と基本設定 |
 | `upload-practice-tests` | `/udemy-exam-prep:upload-practice-tests` | 各セクションの quiz.csv をアップロード。**R4（FAIL時のみ）** |
+| `handle-student-feedback` | `/udemy-exam-prep:handle-student-feedback` | 受講者の指摘への対応（検証 → 見直し → 修正 → 反映 → 公開 → 返信） |
 | `quiz-csv-format` | 自動発火 | Udemy 17カラム CSV の規約（定義元） |
 | `research-cert-docs` | 自動発火 | ベンダー別の調査レシピと sources.md フォーマット（定義元） |
 | `udemy-bulk-upload` | 自動発火 | Playwright での Udemy 操作レシピ（定義元） |
@@ -222,7 +228,8 @@ CSV の読み書きは `scripts/validate_quiz_csv.py` の `read_rows` / `write_r
 
 - Udemy の演習テスト専用コースは**最大6テスト**。`mock_exams` は6以下にする
 - コースが**有料設定済み**でないと演習テストを追加できない
-- Udemy API は公開済みテストの個別問題を編集できない。入れ替えはテスト削除→再作成（`udemy-bulk-upload` にワークアラウンドあり）
+- Udemy API は公開済みテストの個別問題を編集できない。**編集画面で問題ごとに書き換える**のが原則で、多数の問題は `scripts/udemy_sync_server.py` と `scripts/udemy_editor_helper.js` で自動化できる（`udemy-bulk-upload`）。テスト削除→再作成は最終手段
+- 解説は Markdown を解釈されず、`**` が記号のまま表示される。`validate_quiz_csv.py` が FAIL にする。解説の改行の書式は警告で知らせる
 - Udemy は CSV に BOM があるとヘッダー不正と判定する
 - セクション構成は `mock-exam` のみ対応（トピック別構成は未対応）
 

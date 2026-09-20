@@ -47,12 +47,32 @@ def write_rows(path, rows: list[list[str]]) -> None:
         csv.writer(f, quoting=csv.QUOTE_MINIMAL).writerows(rows)
 
 
-# セル内改行の検出用（バックスラッシュ表記を避けて chr で定義）
-NEWLINE_CHARS = (chr(10), chr(13))
-
 # HTML タグに見える文字列の検出用。`<word>` `<word/>` `</word>` だけに当てる
 # （`a < b` や `=>` のような比較・矢印は拾わない）。
 HTML_TAG_RE = re.compile(r"<[A-Za-z_][A-Za-z0-9_-]*\s*/?>|</[A-Za-z_][A-Za-z0-9_-]*>")
+
+
+# Udemy のエディタと受講画面は Markdown を解釈しない。`**強調**` は `**` が記号の
+# まま表示される（実績: ある講座で82問・1,148箇所に混入した）。`**kwargs` のような
+# 対にならない `**` や、`a ** b` のように前後が空白の `**` は対象外。
+# 見出し `#` と行頭の `- ` `* ` も、Markdown として描画されないので同じく落とす。
+MARKDOWN_RE = re.compile(
+    r"(?<![A-Za-z0-9_/*])\*\*(?=\S)[^*\n]+?(?<=\S)\*\*(?![A-Za-z0-9/*_.-])"
+    r"|^\s*#{1,6}\s|^\s*[-*]\s",
+    re.M,
+)
+
+# 解説で選択肢を番号で参照すると、シャッフルで指す先が変わって壊れる
+# （実績: 「より直接的な原因は選択肢2です」が、位置が変わると別の選択肢を指した）。
+OPTION_REF_RE = re.compile(r"選択肢\s*[0-9０-９]")
+
+# Overall Explanation の本文と出典を分ける目印
+SOURCE_RE = re.compile(r"(?:\n+|(?<=\S))\s*(?:出典|参考|Sources?|References?)\s*[:：]", re.I)
+
+# 改行の書式（警告）。空行で段落を区切り、長い解説の壁を作らない。
+OVERALL_MAX_UNBROKEN = 200      # 改行なしで許す Overall Explanation 本文の長さ
+LINE_MAX = 180                  # 1行（改行で区切られた単位）の長さ
+OPTION_MAX_UNBROKEN = 150       # 改行なしで許す選択肢ごとの解説の長さ
 
 
 def correct_indices(cell: str) -> list[str]:
@@ -88,17 +108,12 @@ def validate_csv(path) -> list[str]:
         if qt not in QUESTION_TYPES:
             errors.append(f'Row {i}: invalid Question Type "{qt}"')
 
-        # セル内改行は Udemy の一括取り込みでの破損要因。csv としては正しく
-        # 引用されるので他の検査は通ってしまうため、ここで明示的に落とす。
-        # （実績: ある講座の2・3本目の Overall Explanation に段落区切りが入り、
-        #  4本は単一行という非対称が生まれた）
+        # セル内改行（\n）は一括取り込み時に Udemy 側で <br> に変換され、
+        # 編集画面・API・学習者向け受講画面のいずれでも段落区切りとして
+        # 正しく表示される（実績: CCAR-P で63問全件を検証。取り込みでの
+        # 破損は再現しなかった）。読みやすさのために Explanation /
+        # Overall Explanation へ意図的に \n を入れるのは問題ない。
         for ci, cell in enumerate(row, 1):
-            if any(ch in cell for ch in NEWLINE_CHARS):
-                errors.append(
-                    f"Row {i} col {ci} ({HEADER[ci - 1]}): contains an in-cell "
-                    "newline - write the cell on one line"
-                )
-
             # `<role>` のような `<単語>` 形の文字列は Udemy のサニタイザが
             # HTML タグと判定して**中身ごと削除する**。CSV としては何も
             # おかしくないので他のどの検査も通るが、投入後に選択肢の意味が
@@ -114,6 +129,21 @@ def validate_csv(path) -> list[str]:
                     f"Row {i} col {ci} ({HEADER[ci - 1]}): contains tag-like "
                     f"text {' '.join(tags)} - Udemy strips it on upload; "
                     "name the tags without angle brackets"
+                )
+
+        for ci, cell in enumerate(row, 1):
+            if MARKDOWN_RE.search(cell):
+                errors.append(
+                    f"Row {i} col {ci} ({HEADER[ci - 1]}): contains Markdown "
+                    "syntax (** / heading # / leading - *) - Udemy shows the "
+                    "symbols as-is; use plain text (brackets for emphasis)"
+                )
+            m = OPTION_REF_RE.search(cell)
+            if m:
+                errors.append(
+                    f"Row {i} col {ci} ({HEADER[ci - 1]}): refers to an option "
+                    f"by number ({cell[m.start():m.end() + 4]}) - shuffling "
+                    "changes what the number points to; describe the option"
                 )
 
         nopt = sum(1 for opt, _ in OPTION_PAIRS if row[opt].strip())
@@ -155,6 +185,38 @@ def validate_csv(path) -> list[str]:
     return errors
 
 
+def layout_warnings(path) -> list[str]:
+    """改行の書式の警告。FAIL にはしない（既存の講座を一括で落とさないため）。"""
+    warns: list[str] = []
+    rows = read_rows(path)
+    for i, row in enumerate(rows[1:], 2):
+        if len(row) != 17:
+            continue
+        for opt, exp in OPTION_PAIRS:
+            text = row[exp]
+            if row[opt].strip() and len(text) > OPTION_MAX_UNBROKEN and "\n" not in text:
+                warns.append(
+                    f"Row {i}: {HEADER[exp]} is {len(text)} chars on one line "
+                    "- put the verdict on line 1 and the reason on the next"
+                )
+        overall = row[15]
+        m = SOURCE_RE.search(overall)
+        body = overall[: m.start()] if m else overall
+        body = body.strip("\n")
+        if len(body) > OVERALL_MAX_UNBROKEN and "\n" not in body:
+            warns.append(
+                f"Row {i}: Overall Explanation is {len(body)} chars with no line "
+                "break - separate paragraphs with a blank line"
+            )
+        elif any(len(line) > LINE_MAX for line in body.split("\n")):
+            warns.append(
+                f"Row {i}: Overall Explanation has a paragraph over {LINE_MAX} chars"
+            )
+        if m and m.start() > 0 and not m.group(0).startswith("\n\n"):
+            warns.append(f"Row {i}: put a blank line before the source line")
+    return warns
+
+
 def main(argv: list[str]) -> int:
     safe_stdout()
     if len(argv) < 2:
@@ -173,6 +235,13 @@ def main(argv: list[str]) -> int:
         else:
             n = len(read_rows(target)) - 1
             print(f"OK   {target}: {n} questions, all valid")
+        warns = layout_warnings(target)
+        if warns:
+            print(f"WARN {target}: {len(warns)} layout warning(s) (not a failure)")
+            for w in warns[:10]:
+                print(f"  - {w}")
+            if len(warns) > 10:
+                print(f"  ... and {len(warns) - 10} more")
     return 1 if failed else 0
 
 

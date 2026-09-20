@@ -24,7 +24,7 @@ def row(question="Question text?", opts=None, correct="1"):
     r = [question, "multiple-choice"]
     opts = opts or [f"Option {i + 1}" for i in range(4)]
     for i in range(4):
-        r += [opts[i], f"選択肢{i + 1}の解説"]
+        r += [opts[i], f"解説{i + 1}"]
     r += ["", "", "", ""]
     r += [correct, "【要約】説明。出典: https://example.com/docs ", "Domain 1"]
     return r
