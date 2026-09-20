@@ -1,4 +1,6 @@
-from scripts.validate_quiz_csv import HEADER, read_rows, validate_csv, write_rows
+from scripts.validate_quiz_csv import (
+    HEADER, layout_warnings, read_rows, validate_csv, write_rows,
+)
 
 
 def base_row():
@@ -115,23 +117,22 @@ def test_option_without_explanation_is_reported(tmp_path):
     assert any("option/explanation pair" in e for e in errs)
 
 
-def test_in_cell_newline_is_an_error(tmp_path):
-    """セル内改行は Udemy の一括取り込みでの破損要因なので落とす。
+def test_in_cell_newlines_are_accepted(tmp_path):
+    """セル内改行は段落区切りとして表示されるので、読みやすさのために書いてよい。
 
-    csv としては正しく引用されるため、列数・ヘッダー・正解番号の検査は
-    すべて通ってしまう。それでも落ちることを確認する。
+    Udemy の一括取り込みは実改行を段落に変換し、編集画面・受講画面のどちらでも
+    正しく表示される（実績: 300問の解説を段落分けして反映し、破損しなかった）。
     """
     r = base_row()
-    r[15] = "1行目" + chr(10) + chr(10) + "2行目"
-    errors = validate_csv(build(tmp_path, [r]))
-    assert any("in-cell newline" in e for e in errors)
-    assert any("Overall Explanation" in e for e in errors)
+    r[3] = "Correct." + chr(10) + "It works because ..."
+    r[15] = "1st paragraph" + chr(10) + chr(10) + "2nd paragraph"
+    assert validate_csv(build(tmp_path, [r])) == []
 
 
-def test_carriage_return_in_cell_is_an_error(tmp_path):
+def test_carriage_return_in_cell_is_accepted(tmp_path):
     r = base_row()
-    r[0] = "Question" + chr(13) + "continued"
-    assert any("in-cell newline" in e for e in validate_csv(build(tmp_path, [r])))
+    r[0] = "Question" + chr(13) + chr(10) + "continued"
+    assert validate_csv(build(tmp_path, [r])) == []
 
 
 def test_single_line_cells_pass(tmp_path):
@@ -168,3 +169,92 @@ def test_comparisons_and_arrows_are_not_flagged_as_tags(tmp_path):
     r[0] = "If latency < 200 ms and cost > budget, what applies? A -> B"
     r[15] = "Correct: 3 < 5 and 10 > 2. Source: https://example.com"
     assert validate_csv(build(tmp_path, [r])) == []
+
+
+def test_markdown_bold_is_an_error(tmp_path):
+    """Udemy は Markdown を解釈しないので `**` が記号のまま表示される。"""
+    r = base_row()
+    r[3] = "This is **important** because ..."
+    errors = validate_csv(build(tmp_path, [r]))
+    assert any("Markdown" in e and "Explanation 1" in e for e in errors)
+
+
+def test_markdown_heading_and_bullet_are_errors(tmp_path):
+    r = base_row()
+    r[15] = "# Summary" + chr(10) + "- point one" + chr(10) + "Source: https://example.com"
+    errors = validate_csv(build(tmp_path, [r]))
+    assert any("Markdown" in e and "Overall Explanation" in e for e in errors)
+
+
+def test_code_like_double_asterisks_are_not_flagged(tmp_path):
+    """`**kwargs` や `a ** b` は正当な本文。対にならない・前後が空白の `**` は拾わない。"""
+    r = base_row()
+    r[0] = "What does def f(**kwargs) accept, and what is 2 ** 3?"
+    r[15] = "Both f(**a, **b) and glob patterns like src/**/*.py work. Source: https://example.com"
+    assert validate_csv(build(tmp_path, [r])) == []
+
+
+def test_referring_to_an_option_by_number_is_an_error(tmp_path):
+    """シャッフルで番号の指す先が変わる。"""
+    r = base_row()
+    r[5] = "選択肢2が正解です。"
+    errors = validate_csv(build(tmp_path, [r]))
+    assert any("by number" in e and "Explanation 2" in e for e in errors)
+
+
+def test_the_word_option_without_a_number_is_fine(tmp_path):
+    r = base_row()
+    r[5] = "この選択肢は誤りです。"
+    assert validate_csv(build(tmp_path, [r])) == []
+
+
+def _warn(tmp_path, **cells):
+    r = base_row()
+    for idx, val in cells.items():
+        r[int(idx.lstrip("c"))] = val
+    return layout_warnings(build(tmp_path, [r]))
+
+
+def test_a_long_overall_explanation_without_a_line_break_warns(tmp_path):
+    warns = _warn(tmp_path, c15="あ" * 250 + "。")
+    assert any("Overall Explanation" in w and "no line break" in w for w in warns)
+
+
+def test_paragraphs_separated_by_blank_lines_do_not_warn(tmp_path):
+    body = ("あ" * 120 + "。") + chr(10) + chr(10) + ("い" * 120 + "。")
+    warns = _warn(tmp_path, c15=body + chr(10) + chr(10) + "出典: https://example.com")
+    assert warns == []
+
+
+def test_a_long_single_paragraph_warns_even_with_a_break(tmp_path):
+    body = ("あ" * 250 + "。") + chr(10) + "短い段落。"
+    warns = _warn(tmp_path, c15=body)
+    assert any("paragraph over" in w for w in warns)
+
+
+def test_a_long_option_explanation_on_one_line_warns(tmp_path):
+    warns = _warn(tmp_path, c3="あ" * 160 + "。")
+    assert any("Explanation 1" in w and "one line" in w for w in warns)
+
+
+def test_a_source_on_the_same_line_or_without_a_blank_line_warns(tmp_path):
+    same_line = _warn(tmp_path, c15="短い本文です。出典: https://example.com")
+    single_break = _warn(tmp_path, c15="短い本文です。" + chr(10) + "出典: https://example.com")
+    assert any("blank line before the source" in w for w in same_line)
+    assert any("blank line before the source" in w for w in single_break)
+    ok = _warn(tmp_path, c15="短い本文です。" + chr(10) + chr(10) + "出典: https://example.com")
+    assert ok == []
+
+
+def test_layout_warnings_never_fail_the_cli(tmp_path):
+    """警告は表示するが exit code は 0 のまま（既存の講座を一括で落とさない）。"""
+    import subprocess, sys
+    from pathlib import Path
+    r = base_row()
+    r[15] = "あ" * 300 + "。"
+    p = build(tmp_path, [r])
+    script = Path(__file__).resolve().parents[1] / "plugins" / "udemy-exam-prep" / "scripts" / "validate_quiz_csv.py"
+    proc = subprocess.run([sys.executable, str(script), str(p)], capture_output=True,
+                          text=True, encoding="utf-8", errors="replace")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "WARN" in proc.stdout and "OK" in proc.stdout

@@ -31,7 +31,7 @@ PROMOTED = (
 def row(overall="【要約】説明。出典: https://example.com/docs", qtype="multiple-choice", correct="1"):
     r = ["Question text?", qtype]
     for i in range(4):
-        r += [f"Option {i + 1}", f"選択肢{i + 1}の解説"]
+        r += [f"Option {i + 1}", f"解説{i + 1}"]
     r += ["", "", "", ""]
     r += [correct, overall, "Domain 1"]
     return r

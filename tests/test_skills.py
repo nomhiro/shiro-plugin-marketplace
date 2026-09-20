@@ -7,7 +7,7 @@ SKILLS = PLUGIN / "skills"
 EXPECTED = {
     "init-exam-course", "create-sections", "create-section", "create-udemy-course",
     "upload-practice-tests", "quiz-csv-format", "research-cert-docs",
-    "udemy-bulk-upload",
+    "udemy-bulk-upload", "handle-student-feedback",
 }
 # 汎用化したのに AI-103 固有の記述が残っていたら退行。
 # ベンダー別レシピ表の中の製品名（例: "Azure AI Search hybrid search" という検索クエリ例）は
