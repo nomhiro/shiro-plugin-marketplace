@@ -4,9 +4,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PLUGIN = REPO / "plugins" / "udemy-exam-prep"
 
-# リリースするバージョン。marketplace.json と plugin.json の両方に同じ値が
-# 入っていることを検証する（片方だけ上げる事故を落とすため、ここを唯一の定義元にする）
+# このプラグインのリリース版。marketplace.json の該当エントリと plugin.json の
+# 両方に同じ値が入っていることを検証する（片方だけ上げる事故を落とす）。
 VERSION = "0.6.0"
+# マーケットプレイス自体の版。プラグインを足したら上げる
+MARKETPLACE_VERSION = "0.7.0"
 
 
 def _load(p):
@@ -18,19 +20,24 @@ def test_marketplace_json_shape():
     assert m["name"] == "shiro-plugin-marketplace"
     assert m["owner"]["name"] == "nomhiro"
     names = [p["name"] for p in m["plugins"]]
-    assert names == ["udemy-exam-prep"]
-    entry = m["plugins"][0]
+    assert "udemy-exam-prep" in names
+    entry = next(p for p in m["plugins"] if p["name"] == "udemy-exam-prep")
     assert entry["source"] == "./plugins/udemy-exam-prep"
     assert entry["version"] == VERSION
     assert entry["description"].strip()
+    # 全エントリが最低限の形を満たすこと
+    for e in m["plugins"]:
+        assert e["source"].startswith("./plugins/")
+        assert e["version"] and e["description"].strip()
 
 
 def test_the_two_manifests_declare_the_same_version():
     """片方だけ上げる事故を落とす。"""
     m = _load(REPO / ".claude-plugin" / "marketplace.json")
     p = _load(PLUGIN / ".claude-plugin" / "plugin.json")
-    assert m["metadata"]["version"] == VERSION
-    assert m["plugins"][0]["version"] == VERSION
+    assert m["metadata"]["version"] == MARKETPLACE_VERSION
+    entry = next(x for x in m["plugins"] if x["name"] == "udemy-exam-prep")
+    assert entry["version"] == VERSION
     assert p["version"] == VERSION
 
 
