@@ -1,0 +1,12 @@
+{
+  "name": "stop-ai-slop-jp",
+  "description": "AIで書いた日本語から、AI臭さを取り除くスキル。主体の不在、命題型の見出し、全角ダッシュ、偏愛語、リズムの均一さを直す。iKora128/stop-ai-slop-jp（MIT）をそのまま取り込んだもの",
+  "version": "0.1.1",
+  "author": {
+    "name": "Daichi Nagashima",
+    "url": "https://genshi.ai/"
+  },
+  "homepage": "https://github.com/iKora128/stop-ai-slop-jp",
+  "repository": "https://github.com/iKora128/stop-ai-slop-jp",
+  "license": "MIT"
+}
