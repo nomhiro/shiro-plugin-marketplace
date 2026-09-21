@@ -17,7 +17,7 @@ AGENTS = PLUGIN / "agents"
 SCRIPTS = PLUGIN / "scripts"
 
 VERSION = "0.1.0"
-MARKETPLACE_VERSION = "0.7.0"
+MARKETPLACE_VERSION = "0.8.0"
 
 EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen"}
 EXPECTED_AGENTS = {"transcript-reviewer"}
@@ -47,10 +47,10 @@ def md_files():
 
 
 # ---------------------------------------------------------------- マニフェスト
-def test_marketplace_lists_both_plugins():
+def test_marketplace_lists_all_plugins():
     m = _load(REPO / ".claude-plugin" / "marketplace.json")
     names = [p["name"] for p in m["plugins"]]
-    assert names == ["udemy-exam-prep", "udemy-video-course"]
+    assert names == ["udemy-exam-prep", "udemy-video-course", "stop-ai-slop-jp"]
     assert m["metadata"]["version"] == MARKETPLACE_VERSION
 
 

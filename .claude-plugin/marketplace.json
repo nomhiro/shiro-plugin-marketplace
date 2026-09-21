@@ -7,7 +7,7 @@
   },
   "metadata": {
     "description": "nomhiro's Claude Code plugins",
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "plugins": [
     {
@@ -47,6 +47,26 @@
         "screencast",
         "narration",
         "ffmpeg"
+      ]
+    },
+    {
+      "name": "stop-ai-slop-jp",
+      "source": "./plugins/stop-ai-slop-jp",
+      "description": "AIで書いた日本語から、AI臭さを取り除くスキル。主体の不在、命題型の見出し、全角ダッシュ、偏愛語、リズムの均一さを直す。iKora128/stop-ai-slop-jp（MIT）をそのまま取り込んだもの",
+      "version": "0.1.1",
+      "author": {
+        "name": "Daichi Nagashima",
+        "url": "https://genshi.ai/"
+      },
+      "homepage": "https://github.com/iKora128/stop-ai-slop-jp",
+      "repository": "https://github.com/iKora128/stop-ai-slop-jp",
+      "license": "MIT",
+      "keywords": [
+        "japanese",
+        "writing",
+        "editing",
+        "ai-slop",
+        "proofreading"
       ]
     }
   ]
