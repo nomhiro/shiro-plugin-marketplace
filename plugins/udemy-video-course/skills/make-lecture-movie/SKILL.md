@@ -110,6 +110,7 @@ lectures/<NN_section>/
 
 ## よくある落とし穴
 
+- **英字の略語・記号の誤読**：`az` を「アズ」と読むなど、TTS は台本の表記どおりには読まないことがある。台本を書く前に **`../../references/tts-readings.md`（読み上げ表記一覧）** を見て、載っている表記は台本での書き方に直す（例：`az login` → 「エーゼットログイン」）。直したら該当区間の `speech_NN.wav` を削除して `--audio-only` → `--video-only --force`（手順は一覧の D）。
 - **flash-tts の2分バグ**：flash系モデルは約2分以上を一度に生成すると読み上げが速くなる。本スキルは `--max-chunk-chars`（文単位）で細分割して結合し回避済み。長い台本でも速度が一定か確認する。
 - **認証・権限エラー**：`PERMISSION_DENIED: Agent Platform API has not been used...` は `aiplatform.googleapis.com` の未有効化が原因（Gemini-TTSはVertex AI経由）。ADCログインと上記2APIの有効化を確認。API有効化直後は反映に数分かかる場合がある。
 - **soffice が PDF を生成しない**：別の soffice 常駐インスタンスが横取りしている／対象 pptx を PowerPoint で開いている → スクリプトは soffice を全終了して一度だけ再試行する。`lectures/.../~$*.pptx` ロックがあれば PowerPoint を閉じる。
