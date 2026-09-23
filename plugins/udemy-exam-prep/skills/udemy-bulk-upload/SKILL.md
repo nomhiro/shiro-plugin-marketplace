@@ -200,6 +200,28 @@ async () => {
 | 所要時間 | 60問で10秒前後 |
 | テンプレート版 | ダイアログのリンクは `PracticeTestBulkQuestionUploadTemplate_V2.2.csv`。ヘッダー17列は v2 と完全一致 |
 
+### 投入後に出典 URL をリンクにする（必須の仕上げ）
+
+**一括アップロードした解説中の URL は素のテキストとして保存され、受講者はクリックできない。**
+解説に出典を載せる以上、リンクとして表示されなければ意味が薄い。投入したら全問をリンク化してから公開する。
+
+> 実績: 投入後の全体解説は `<p>出典: https://learn.example.com/...</p>` として保存されていた（`<a>` なし）。
+> 問題エディタで URL を `<a href="..." target="_blank">` に差し替えて「質問を保存」すると、
+> 再読み込み後もリンクとして残った。表示される文字（innerText）は変わらないので、署名による照合とも両立する。
+
+- **CSV に `<a href>` を書かない。** `validate_quiz_csv.py` のタグ検査が `</a>` を FAIL にする。一括アップロードで HTML リンクが保持されるかは未検証で、CSV は素の URL のまま（`出典: <URL>` の形。URL の直後は半角スペースか行末）にしておく
+- 手作業ならエディタの「リンクを挿入」（`data-purpose="PROMPT_ANCHOR"`）でも付けられるが、URL 欄とテキスト欄を両方埋める必要があり数が多いと現実的でない。ヘルパーを使う:
+
+```
+1. 同期サーバーを起動し（下記「多数の問題を書き換える」の手順1）、編集画面でヘルパーを読み込んで __u.load(<セクション番号>)
+2. __u.runBg([1, 2, ..., N], 'link')   // 本文には触れず、素の URL だけを <a target="_blank"> にして保存。jobStatus() で進捗
+3. 再読み込み → ヘルパー再読み込み → __u.load(N) → __u.auditBg(1, N)
+   auditStatus() の mismatch が空なら、本文が CSV と一致し、かつ素の URL が残っていない（照合の unlinked が 0）
+```
+
+- `'link'` モードは本文を書き換えない。位置合わせは CSV の新しい版の署名で行うので、`--old-ref` は投入した版と同じでよい
+- `run`（書き換え）でも、入力の直後に URL を自動でリンク化する（`__u.links = false` で無効化）。書き換えとリンク化を別々に回す必要はない
+
 ### `browser_run_code_unsafe` は `async () => { ... }` で渡す
 
 **トップレベルの文を受け付けない。** `const x = ...` や `await page...` から
@@ -294,9 +316,11 @@ async () => {
 |---|---|
 | `load(sec)` | 問題データと旧版の署名を取得 |
 | `visible()` | `document.visibilityState` を返す。`'hidden'` なら前面表示を依頼する |
-| `runBg(list)` / `jobStatus()` | バックグラウンドで書き換え（再試行内蔵）/ 進捗・`retries`・`log`・`hidden`・`stopped` |
+| `runBg(list)` / `jobStatus()` | バックグラウンドで書き換え（再試行内蔵。入力後に素の URL をリンク化）/ 進捗・`retries`・`log`・`hidden`・`stopped` |
+| `runBg(list, 'link')` | 本文に触れず、素の URL だけを `<a target="_blank">` にして保存する（一括アップロード後の仕上げ） |
+| `links` | `run` 時のリンク化の有無（既定 `true`）。`false` にすると照合でも未リンクを数えない |
 | `stop()` | 実行中の `runBg` / `auditBg` を次の問題の手前で止める |
-| `auditBg(a, b)` / `auditStatus()` | バックグラウンドで照合 / `at`・`mismatch`・`err`・`hidden`・`done` |
+| `auditBg(a, b)` / `auditStatus()` | バックグラウンドで照合 / `at`・`mismatch`・`err`・`hidden`・`done`。素の URL が残る問題（`unlinked` > 0）も `mismatch` に入る |
 | `audit(a, b)` | 同期版の照合（15問程度まで） |
 | `dismiss()` | 「更新が保存されていません」モーダルを×で閉じる |
 

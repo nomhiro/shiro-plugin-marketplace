@@ -9,7 +9,11 @@
  *   __u.auditBg(1, 50);                 // 保存内容を CSV と照合（バックグラウンド）。__u.auditStatus() の mismatch が空なら一致
  *   await __u.audit(1, 15);             // 同期版の照合。1回の JS 実行が45秒を超えないよう 15 問程度まで
  *   await __u.runAll([問題番号, ...]);  // 同期版。通常モードでは1問でも45秒を超えることがあるので runBg を使う
+ *   __u.runBg([問題番号, ...], 'link'); // 本文はそのままで、素の URL だけをリンクに変える（一括アップロード直後に使う）
+ *   __u.links = false;                  // run 時の URL リンク化を止める（既定は true）
  * 入力は execCommand('insertText')（type アクションは文字が欠落・置換・入れ替わる）。
+ * URL のリンク化は execCommand('insertHTML') で <a href target="_blank"> を差し込む。innerText は変わらないので署名照合と両立する。
+ * 一括アップロード（CSV）の URL は素のテキストとして保存され、受講者はクリックできない（実測: <p>出典: https://...</p>）。
  * ページを再読み込みすると __u・データ・ジョブ状態は消える。読み込みからやり直す。
  */
 window.__BASE = window.__BASE || 'http://127.0.0.1:8765';
@@ -28,6 +32,29 @@ window.__u={
     const r=document.createRange();r.selectNodeContents(e);
     const s=window.getSelection();s.removeAllRanges();s.addRange(r);
     document.execCommand('insertText',false,text);return this.h(this.eds()[i].innerText);},
+  links:true,
+  // 素の URL（<a> の外にあるもの）。末尾の句読点・閉じ括弧は URL に含めない
+  _urlRe(){return /https?:\/\/[^\s<>"'、。，．（）「」【】]+/g;},
+  _trimUrl(u){return u.replace(/[.,;:!?)\]}]+$/,'');},
+  _bare(e){const out=[];const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);let n;
+    while((n=w.nextNode())){if(n.parentElement&&n.parentElement.closest('a'))continue;const re=this._urlRe();let m;
+      while((m=re.exec(n.textContent))){const u=this._trimUrl(m[0]);if(u.length>8)out.push({node:n,idx:m.index,url:u});}}
+    return out;},
+  unlinked(e){return this._bare(e).length;},
+  linkify(e){let n=0;for(let guard=0;guard<50;guard++){const b=this._bare(e)[0];if(!b)break;
+      e.focus();const r=document.createRange();r.setStart(b.node,b.idx);r.setEnd(b.node,b.idx+b.url.length);
+      const s=window.getSelection();s.removeAllRanges();s.addRange(r);
+      document.execCommand('insertHTML',false,'<a href="'+b.url+'" target="_blank" rel="noopener noreferrer">'+b.url+'</a>');n++;}
+    return n;},
+  linkifyAll(){let n=0;for(const e of this.eds())n+=this.linkify(e);return n;},
+  // 本文には触れず、URL だけをリンクにして保存する（一括アップロード後の仕上げ用）
+  async linkifyOne(q){if(!(await this.goto(q)))return JSON.stringify({q:q,abort:'align',head:(this.eds()[0]?.innerText||'').slice(0,20)});
+    const before=JSON.parse(this.sig());const n=this.linkifyAll();
+    if(!n)return JSON.stringify({q:q,ok:true,linked:0});
+    if(JSON.stringify(JSON.parse(this.sig()))!==JSON.stringify(before))return JSON.stringify({q:q,abort:'linktext'});
+    await this.sleep(200);this.save();await this.sleep(2800);this.dismiss();
+    const left=this.eds().reduce((a,e)=>a+this.unlinked(e),0);
+    return JSON.stringify(left?{q:q,ok:false,abort:'unlinked',left:left}:{q:q,ok:true,linked:n});},
   setCorrect(a){const t=this.tog();let n=0;t.forEach((c,i)=>{const w=a.includes(i+1);if(c.checked!==w){c.click();n++;}});
     return JSON.stringify({clicked:n,now:this.tog().map(c=>c.checked)});},
   setDomain(name){const r=[...document.querySelectorAll('input[type="radio"]')].filter(x=>!x.closest('[class*="answer--answer-toggle--"]'));
@@ -64,6 +91,7 @@ window.__u={
     if(this.eds().length!==d.f.length)return JSON.stringify({q:q,abort:'fieldcount',have:this.eds().length,want:d.f.length,nopt:this.tog().length,wantn:d.n,ty:this.tog()[0]?.type,wantty:d.type});
     if((this.tog()[0]?.type==='checkbox')!==(d.type==='multi-select'))return JSON.stringify({q:q,abort:'type',have:this.tog()[0]?.type,want:d.type});
     for(let i=0;i<d.f.length;i++){this.setText(i,d.f[i]);await new Promise(r=>setTimeout(r,110));}
+    if(this.links){this.linkifyAll();await new Promise(r=>setTimeout(r,200));}
     this.setCorrect(d.correct);
     if(d.domain)this.setDomain(d.domain);
     const got=JSON.parse(this.sig());
@@ -86,7 +114,8 @@ window.__u={
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='hidden')return;
       for(const j of [window.__job,window.__audit])if(j&&j.running)j.hidden.push({q:j.cur,at:new Date().toISOString(),ev:'visibilitychange'});});},
   stop(){let n=0;for(const j of [window.__job,window.__audit])if(j&&j.running){j.stopReq=true;n++;}return n?'stopping':'idle';},
-  runBg(list){if(window.__job&&window.__job.running)return 'busy';
+  runBg(list,mode){if(window.__job&&window.__job.running)return 'busy';
+    const fn=mode==='link'?'linkifyOne':'run';
     const base=!!this.fast;const job=window.__job={total:list.length,done:0,running:true,stopped:null,stopReq:false,cur:null,results:[],retries:0,log:[],hidden:[]};
     this._watch();
     (async()=>{try{for(const q of list){
@@ -94,7 +123,7 @@ window.__u={
         job.cur=q;this._hidden(job,q);let r=null;
         for(let t=0;t<this.tries;t++){
           this.fast=t===0?base:false;this.dismiss();
-          try{r=JSON.parse(await this.run(q));}catch(e){r={q:q,abort:'exc',e:String(e)};}
+          try{r=JSON.parse(await this[fn](q));}catch(e){r={q:q,abort:'exc',e:String(e)};}
           if(r.ok&&!r.abort)break;
           job.log.push(Object.assign({try:t+1,hidden:this.visible()==='hidden'},r));
           if(t+1<this.tries){job.retries++;await this.sleep(this.retryWait);}}
@@ -110,8 +139,10 @@ window.__u={
     const got=JSON.parse(this.sig());const d=window.__d[String(q)];
     const okAll=JSON.stringify(got)===JSON.stringify(d.sig);
     const cor=this.tog().map((c,i)=>c.checked?i+1:0).filter(Boolean);
-    return {q:q,nav:g,sig:okAll,cor:JSON.stringify(cor)===JSON.stringify(d.correct),ty:(this.tog()[0]?.type==='checkbox')===(d.type==='multi-select')};},
-  bad(x){return !x.sig||!x.cor||!x.ty||!x.nav;},
+    const unl=this.links?this.eds().reduce((a,e)=>a+this.unlinked(e),0):0;
+    return {q:q,nav:g,sig:okAll,cor:JSON.stringify(cor)===JSON.stringify(d.correct),ty:(this.tog()[0]?.type==='checkbox')===(d.type==='multi-select'),unlinked:unl};},
+  // unlinked: リンクになっていない素の URL の数（links=false なら数えない）
+  bad(x){return !x.sig||!x.cor||!x.ty||!x.nav||(x.unlinked||0)>0;},
   async audit(a,b){const out=[];for(let q=a;q<=b;q++){let x;try{x=await this.auditOne(q);}catch(e){x={q:q,err:String(e)};}
     if(x.err||this.bad(x))out.push(x);}
     return JSON.stringify(out);},

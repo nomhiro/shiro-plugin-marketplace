@@ -238,3 +238,50 @@ def test_upload_reads_course_meta_before_asking_and_keeps_live_tests():
     assert "is_published,status_label" in text
     assert "公開済みのコースでは削除→再作成しない" in text
     assert "更新履歴" in text
+
+
+# 一括アップロードの URL は素のテキストで保存され、受講者がクリックできなかった。
+# 投入後にリンク化する 'link' モードと、照合での未リンク検出を退行させない。
+
+@needs_node
+def test_helper_exposes_the_link_api():
+    got = run_node("return ['linkify','linkifyAll','linkifyOne','unlinked'].filter(n => typeof __u[n] !== 'function').concat(__u.links === true ? [] : ['links']);")
+    assert got == []
+
+
+@needs_node
+def test_run_bg_link_mode_calls_linkify_one_not_run():
+    got = run_node("""
+      const calls = [];
+      __u.run = async q => { calls.push('run' + q); return JSON.stringify({q, ok: true}); };
+      __u.linkifyOne = async q => { calls.push('link' + q); return JSON.stringify({q, ok: true, linked: 1}); };
+      __u.runBg([1, 2], 'link'); await until(() => !__job.running);
+      return {calls, done: __job.done};
+    """)
+    assert got == {"calls": ["link1", "link2"], "done": 2}
+
+
+@needs_node
+def test_audit_treats_remaining_bare_urls_as_a_mismatch():
+    got = run_node("""
+      const ok = {sig: true, cor: true, ty: true, nav: true};
+      return [__u.bad(Object.assign({unlinked: 0}, ok)), __u.bad(Object.assign({unlinked: 2}, ok)), __u.bad(ok)];
+    """)
+    assert got == [False, True, False]
+
+
+@needs_node
+def test_url_pattern_stops_at_japanese_punctuation_and_trailing_dots():
+    got = run_node("""
+      const f = s => (s.match(__u._urlRe()) || []).map(u => __u._trimUrl(u));
+      return [f('出典: https://example.com/a/b'), f('（https://example.com/x）を参照。'), f('see https://example.com/y.')];
+    """)
+    assert got == [["https://example.com/a/b"], ["https://example.com/x"], ["https://example.com/y"]]
+
+
+def test_skills_require_linking_source_urls_after_bulk_upload():
+    bulk = _skill("udemy-bulk-upload")
+    assert "投入後に出典 URL をリンクにする" in bulk and "runBg([1, 2, ..., N], 'link')" in bulk
+    assert "CSV に `<a href>` を書かない" in bulk
+    assert "出典 URL をリンクにする" in _skill("upload-practice-tests")
+    assert "素の URL のまま" in _skill("quiz-csv-format")
