@@ -281,7 +281,19 @@ def test_url_pattern_stops_at_japanese_punctuation_and_trailing_dots():
 
 def test_skills_require_linking_source_urls_after_bulk_upload():
     bulk = _skill("udemy-bulk-upload")
-    assert "投入後に出典 URL をリンクにする" in bulk and "runBg([1, 2, ..., N], 'link')" in bulk
-    assert "CSV に `<a href>` を書かない" in bulk
-    assert "出典 URL をリンクにする" in _skill("upload-practice-tests")
-    assert "素の URL のまま" in _skill("quiz-csv-format")
+    assert "出典 URL はリンクにして投入する" in bulk and "linkify_csv.py" in bulk
+    assert "既存の問題をすべて CSV の内容で置き換える" in bulk
+    assert "runBg([1, 2, ..., N], 'link')" in bulk
+    up = _skill("upload-practice-tests")
+    assert "linkify_csv.py" in up and "既存問題をすべて置き換える" in up
+    assert "linkify_csv.py" in _skill("quiz-csv-format")
+
+
+@needs_node
+def test_helper_links_only_urls_on_source_lines():
+    got = run_node("""
+      return [__u._srcLine('出典: https://example.com/a'), __u._srcLine('参考：https://example.com/b'),
+              __u._srcLine('スコープ https://ai.example.com/.default を使う'),
+              ('https://ai.example.com/.defaultのOAuth'.match(__u._urlRe()) || [])[0]];
+    """)
+    assert got == [True, True, False, "https://ai.example.com/.default"]

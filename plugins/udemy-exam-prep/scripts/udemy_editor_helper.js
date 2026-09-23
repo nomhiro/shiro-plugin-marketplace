@@ -33,11 +33,16 @@ window.__u={
     const s=window.getSelection();s.removeAllRanges();s.addRange(r);
     document.execCommand('insertText',false,text);return this.h(this.eds()[i].innerText);},
   links:true,
-  // 素の URL（<a> の外にあるもの）。末尾の句読点・閉じ括弧は URL に含めない
-  _urlRe(){return /https?:\/\/[^\s<>"'、。，．（）「」【】]+/g;},
+  // 素の URL（<a> の外にあるもの）。URL に使える半角文字だけを取り（直後の日本語を巻き込まない）、
+  // 末尾の句読点・閉じ括弧は含めない。リンクにするのは「出典:」「参考:」で始まる行だけ
+  // （本文中のスコープ値 https://…/.default のような URL の形をした値はリンクにしない。linkify_csv.py と同じ規則）
+  _urlRe(){return /https?:\/\/[A-Za-z0-9\-._~:\/?#\[\]@!$&()*+,;=%]+/g;},
   _trimUrl(u){return u.replace(/[.,;:!?)\]}]+$/,'');},
+  _srcLine(t){return /^\s*(出典|参考)\s*[:：]/.test(t);},
+  // 行頭（直前の <br> か段落の先頭）からこのテキストまで。「出典: <a>URL1</a>, URL2」の URL2 も出典行と判定するため
+  _lineHead(n){let s='';let p=n.previousSibling;while(p&&p.nodeName!=='BR'){s=(p.textContent||'')+s;p=p.previousSibling;}return s+n.textContent;},
   _bare(e){const out=[];const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT);let n;
-    while((n=w.nextNode())){if(n.parentElement&&n.parentElement.closest('a'))continue;const re=this._urlRe();let m;
+    while((n=w.nextNode())){if(n.parentElement&&n.parentElement.closest('a'))continue;if(!this._srcLine(this._lineHead(n)))continue;const re=this._urlRe();let m;
       while((m=re.exec(n.textContent))){const u=this._trimUrl(m[0]);if(u.length>8)out.push({node:n,idx:m.index,url:u});}}
     return out;},
   unlinked(e){return this._bare(e).length;},
