@@ -40,6 +40,8 @@ LOOP_RATIO, CUT_RATIO = 1.8, 0.62
 CPS_BAND = (3.0, 8.5)
 # 音声の途中の無音。これより長い無音が頭と末尾以外にあれば異常を疑う（句読点の間は 1 秒未満）
 INNER_SILENCE_SEC, SILENCE_DB = 2.0, -40
+# 末尾の無音。合成の末尾に数秒の無音が付くと、フレームの尺が伸びて動画に長い無音ができる
+TAIL_SILENCE_SEC = 2.0
 
 SLIDE_RE = re.compile(r"^スライド\s*(\d+)\s*[:：]")
 REC_RE = re.compile(
@@ -81,7 +83,7 @@ def ffprobe_duration(path: Path) -> float | None:
 
 
 def inner_silences(path: Path, total: float) -> list[tuple[float, float]]:
-    """頭と末尾を除いた、INNER_SILENCE_SEC 以上の無音区間 [(start, 長さ)]。"""
+    """途中の INNER_SILENCE_SEC 以上の無音と、末尾の TAIL_SILENCE_SEC 以上の無音 [(start, 長さ)]。"""
     try:
         err = subprocess.run(
             ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af",
@@ -95,6 +97,13 @@ def inner_silences(path: Path, total: float) -> list[tuple[float, float]]:
     for st, du in zip(starts, durs):
         if st > 0.3 and st + du < total - 0.3:
             out.append((st, du))
+    # 末尾の無音（最後の silence_start が末尾まで続き、閉じていない場合を含む）
+    if len(starts) > len(durs):
+        tail = total - starts[-1]
+        if starts[-1] > 0.3 and tail >= TAIL_SILENCE_SEC:
+            out.append((starts[-1], tail))
+    elif starts and durs and starts[-1] + durs[-1] >= total - 0.3 and durs[-1] >= TAIL_SILENCE_SEC:
+        out.append((starts[-1], durs[-1]))
     return out
 
 
@@ -159,7 +168,7 @@ def check_tts(segs, audio_dir: Path, cps: float):
             findings.append((seg["head"], f"読み上げ速度が帯の外（{chars_per_sec:.1f}字/秒）"))
         for st, du in inner_silences(wav, d):
             findings.append((seg["head"],
-                             f"途中に長い無音（{st:.1f}s から {du:.1f}s）。wav を退避して再合成する"))
+                             f"長い無音（{st:.1f}s から {du:.1f}s）。wav を退避して再合成する"))
         if seg["kind"] == "rec":
             rec_span += seg["span"]
             rec_narr += d
