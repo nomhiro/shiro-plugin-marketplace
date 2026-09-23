@@ -38,6 +38,9 @@ DEFAULT_CPS = 5.7
 LOOP_RATIO, CUT_RATIO = 1.8, 0.62
 # 1秒あたりの文字数。この帯を外れると読み上げが異常に速い/遅い
 CPS_BAND = (3.0, 8.5)
+# 読み上げ速度の判定は、この文字数以上の区間だけ（英字の多い短文「Successfully installed と出れば完了です。」は
+# 文字数に対して速く読まれ、毎回帯の外に出る誤検知になっていた）
+SPEED_MIN_CHARS = 40
 # 音声の途中の無音。これより長い無音が頭と末尾以外にあれば異常を疑う（句読点の間は 1 秒未満。文末の間は 2 秒前後になることがあるので 2.5 秒）
 INNER_SILENCE_SEC, SILENCE_DB = 2.5, -40
 # 末尾の無音。合成の末尾に数秒の無音が付くと、フレームの尺が伸びて動画に長い無音ができる
@@ -164,7 +167,7 @@ def check_tts(segs, audio_dir: Path, cps: float):
             findings.append((seg["head"], f"ループ疑い（実尺/期待尺={ratio:.2f}）"))
         elif ratio < CUT_RATIO:
             findings.append((seg["head"], f"途切れ疑い（実尺/期待尺={ratio:.2f}）"))
-        elif not (CPS_BAND[0] <= chars_per_sec <= CPS_BAND[1]):
+        elif len(seg["text"]) >= SPEED_MIN_CHARS and not (CPS_BAND[0] <= chars_per_sec <= CPS_BAND[1]):
             findings.append((seg["head"], f"読み上げ速度が帯の外（{chars_per_sec:.1f}字/秒）"))
         for st, du in inner_silences(wav, d):
             findings.append((seg["head"],
