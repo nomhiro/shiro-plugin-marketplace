@@ -93,3 +93,148 @@ def test_the_skill_documents_both_scripts_and_they_exist():
         assert name in text and (PLUGIN / "scripts" / name).is_file()
     assert (PLUGIN / "scripts" / "udemy_editor_helper.js").is_file()
     assert "editor-helper.js" in text
+
+
+# --- ヘルパー JS の実行時の振る舞い ------------------------------------------
+#
+# 公開中コースの一括書き換えで実際に止まった箇所（再試行なしの runBg、例外で
+# 完了フラグが立たない audit、裏タブでの停止）を退行させないための歯止め。
+
+HELPER_JS = PLUGIN / "scripts" / "udemy_editor_helper.js"
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node が無い環境では JS を実行できない")
+
+
+def run_node(body: str, visibility: str = "visible"):
+    """document を最小限に差し替えてヘルパーを読み込み、body（async）の戻り値を JSON で返す。"""
+    js = (
+        "global.window = global; global.document = {querySelectorAll: () => [], visibilityState: "
+        + json.dumps(visibility) + "};"
+        + HELPER_JS.read_text(encoding="utf-8")
+        + ";const until=async(f)=>{for(let i=0;i<500&&!f();i++)await new Promise(r=>setTimeout(r,2));};"
+        + "(async()=>{const out=await (async()=>{" + body + "})();console.log(JSON.stringify(out));})()"
+        + ".catch(e=>{console.error(e);process.exit(1);});"
+    )
+    proc = subprocess.run(["node", "-e", js], capture_output=True, text=True, encoding="utf-8")
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout)
+
+
+@needs_node
+def test_helper_passes_node_syntax_check():
+    proc = subprocess.run(["node", "--check", str(HELPER_JS)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+@needs_node
+def test_helper_exposes_the_documented_api():
+    names = ["load", "run", "runBg", "runAll", "jobStatus", "stop", "visible",
+             "audit", "auditBg", "auditStatus", "dismiss"]
+    got = run_node("return " + json.dumps(names) + ".filter(n => typeof __u[n] !== 'function');")
+    assert got == []
+
+
+@needs_node
+def test_run_bg_retries_a_failed_question_with_fast_off():
+    got = run_node("""
+      __u.retryWait = 0; __u.fast = true; const seen = {};
+      __u.run = async q => { seen[q] = (seen[q] || []).concat(__u.fast);
+        if (q === 2 && seen[q].length < 3) return JSON.stringify({q, abort: 'align'});
+        return JSON.stringify({q, ok: true}); };
+      __u.runBg([1, 2, 3]); await until(() => !__job.running);
+      return {job: __job, seen, fast: __u.fast};
+    """)
+    job = got["job"]
+    assert job["done"] == 3 and job["stopped"] is None and job["running"] is False
+    assert job["retries"] == 2 and [x["abort"] for x in job["log"]] == ["align", "align"]
+    assert got["seen"]["2"] == [True, False, False]   # 再試行は通常モード
+    assert got["fast"] is True                         # 利用者の設定は戻す
+
+
+@needs_node
+def test_run_bg_stops_after_three_failures_and_catches_exceptions():
+    got = run_node("""
+      __u.retryWait = 0;
+      __u.run = async q => { if (q === 2) throw new Error('boom'); return JSON.stringify({q, ok: true}); };
+      __u.runBg([1, 2, 3]); await until(() => !__job.running);
+      return __job;
+    """)
+    assert got["done"] == 2 and got["stopped"]["abort"] == "exc" and got["stopped"]["q"] == 2
+    assert len(got["log"]) == 3 and got["retries"] == 2 and got["running"] is False
+
+
+@needs_node
+def test_stop_halts_before_the_next_question():
+    got = run_node("""
+      __u.retryWait = 0;
+      __u.run = async q => { await new Promise(r => setTimeout(r, 20)); return JSON.stringify({q, ok: true}); };
+      __u.runBg([1, 2, 3, 4]); await until(() => __job.done >= 1); __u.stop();
+      await until(() => !__job.running);
+      return {job: __job};
+    """)
+    job = got["job"]
+    assert job["running"] is False and job["stopped"]["abort"] == "stop" and job["done"] < 4
+
+
+@needs_node
+def test_run_bg_refuses_a_second_job_while_running():
+    got = run_node("""
+      __u.run = async q => { await new Promise(r => setTimeout(r, 20)); return JSON.stringify({q, ok: true}); };
+      const first = __u.runBg([1, 2]); const second = __u.runBg([3]);
+      await until(() => !__job.running); return [first, second];
+    """)
+    assert got == ["started 2", "busy"]
+
+
+@needs_node
+def test_audit_bg_survives_exceptions_and_reports_progress():
+    got = run_node("""
+      __u.auditOne = async q => { if (q === 2) throw new Error('boom');
+        return {q, nav: true, sig: q !== 3, cor: true, ty: true}; };
+      __u.auditBg(1, 4); await until(() => !__audit.running);
+      return JSON.parse(__u.auditStatus());
+    """)
+    assert got["done"] is True and got["at"] == 4 and got["running"] is False
+    assert [x["q"] for x in got["mismatch"]] == [3]
+    assert [x["q"] for x in got["err"]] == [2]
+
+
+@needs_node
+def test_hidden_tab_is_recorded_in_the_job():
+    got = run_node("""
+      __u.run = async q => JSON.stringify({q, ok: true});
+      __u.runBg([1, 2]); await until(() => !__job.running);
+      return {v: __u.visible(), hidden: __job.hidden.map(h => h.q)};
+    """, visibility="hidden")
+    assert got == {"v": "hidden", "hidden": [1, 2]}
+
+
+# --- スキルに残す実測の要点 ----------------------------------------------------
+
+def _skill(name):
+    return (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_bulk_upload_prefers_claude_in_chrome_and_maps_the_tools():
+    text = _skill("udemy-bulk-upload")
+    assert "Claude in Chrome を第一手段" in text
+    for tool in ("tabs_context_mcp", "javascript_tool", "file_upload", "find"):
+        assert tool in text, tool
+    assert "トップレベル `await`" in text and "45秒" in text
+
+
+def test_bulk_upload_documents_the_new_helper_api_and_pitfalls():
+    text = _skill("udemy-bulk-upload")
+    for api in ("__u.visible()", "__u.stop()", "__u.auditBg", "__u.auditStatus()", "__u.runBg"):
+        assert api in text, api
+    assert "visibilityState" in text
+    assert "1本ずつ・1タブ" in text
+    assert "保存せずに離れる" in text
+    assert "学習者に更新メッセージを送信" in text
+
+
+def test_upload_reads_course_meta_before_asking_and_keeps_live_tests():
+    text = _skill("upload-practice-tests")
+    assert "udemy-course-meta.md" in text and "quizId 対応表" in text
+    assert "is_published,status_label" in text
+    assert "公開済みのコースでは削除→再作成しない" in text
+    assert "更新履歴" in text

@@ -1,6 +1,6 @@
 # udemy-exam-prep
 
-認定資格の試験対策問題集（Udemy 演習テスト講座）を作るハーネス。公式ドキュメントの調査から、本番相当フル模試の生成・検証、Udemy へのアップロードまでを、スキル8個・サブエージェント3個・検証スクリプト8本で自動化します。
+認定資格の試験対策問題集（Udemy 演習テスト講座）を作るハーネス。公式ドキュメントの調査から、本番相当フル模試の生成・検証、Udemy へのアップロードまでを、スキル10個・サブエージェント3個・検証スクリプト群で自動化します。
 
 資格固有の情報は **プロジェクト側 `sections.md` の YAML front matter だけ** が持ちます。ハーネス自体は資格非依存なので、同じプラグインを任意のベンダー・任意の資格に使えます。
 
@@ -11,7 +11,7 @@
 /plugin install udemy-exam-prep@shiro-plugin-marketplace
 ```
 
-前提: Python 3.11+ / PyYAML。Playwright MCP はプラグインが同梱しています。
+前提: Python 3.11+ / PyYAML。Udemy の操作は Claude in Chrome（ログイン済みの Chrome をそのまま使う）を第一手段とし、使えない環境では Playwright MCP（プラグイン同梱）を代替にします。
 
 ## ワークフロー
 
@@ -34,6 +34,10 @@ Phase 1b   /udemy-exam-prep:create-section N   （1 〜 mock_exams を順に）
              → 長さバイアス検出 → 出典URL正規化 → 選択肢シャッフル（最良シード自動走査）
              ★ R3: セクション全体レビュー ★
              ↓
+Phase 1c   /udemy-exam-prep:review-section <N|all>   （任意・強く推奨）
+             → 全問・全カラムを1問ずつ精読（製品名の和訳・翻訳調・表記ゆれ・出典と正答の食い違い）
+             → 統一表記シートで一括修正 → check_invariants.py で不変条件を検査
+             ↓
 Phase 2    /udemy-exam-prep:create-udemy-course
              → Udemy にコース作成・基本設定・学習目的・メッセージ
              ↓
@@ -41,7 +45,8 @@ Phase 3    /udemy-exam-prep:upload-practice-tests
              → CSV 事前検証 → 演習テスト追加・設定・CSV 一括アップロード
              ★ R4: CSV 検証 FAIL 時のみ ★
              ↓
-Phase 4    価格設定・審査提出・公開 — すべて人が行う（自動化対象外）
+Phase 4    価格設定・審査提出・公開 — プロジェクトの CLAUDE.md の公開方針に従う
+             （記載がなければ人が行う。ユーザー承認のうえで自動化対象に変えられる）
              ↓
 Phase 5    /udemy-exam-prep:handle-student-feedback
              → 公開後に受講者の指摘が来たとき。一次情報で検証 → 講座全体を見直し
@@ -58,10 +63,11 @@ Phase 5    /udemy-exam-prep:handle-student-feedback
 | `create-section` | `/udemy-exam-prep:create-section 2` | フル模試1本を生成・検証・シャッフル。**R2（初回）/ R3 で停止** |
 | `create-udemy-course` | `/udemy-exam-prep:create-udemy-course` | Udemy にコース作成と基本設定 |
 | `upload-practice-tests` | `/udemy-exam-prep:upload-practice-tests` | 各セクションの quiz.csv をアップロード。**R4（FAIL時のみ）** |
+| `review-section` | `/udemy-exam-prep:review-section 2` | 完成した quiz.csv の精読レビューと一括修正。修正前後の不変条件（正解・配分・選択肢数・出典・正誤印）をスクリプトで検査 |
 | `handle-student-feedback` | `/udemy-exam-prep:handle-student-feedback` | 受講者の指摘への対応（検証 → 見直し → 修正 → 反映 → 公開 → 返信） |
 | `quiz-csv-format` | 自動発火 | Udemy 17カラム CSV の規約（定義元） |
 | `research-cert-docs` | 自動発火 | ベンダー別の調査レシピと sources.md フォーマット（定義元） |
-| `udemy-bulk-upload` | 自動発火 | Playwright での Udemy 操作レシピ（定義元） |
+| `udemy-bulk-upload` | 自動発火 | Udemy のブラウザ操作レシピ（Claude in Chrome を第一手段・Playwright を代替。定義元） |
 
 ## サブエージェント
 
@@ -109,6 +115,40 @@ domains:                                    # 必須。create-sections が確定
 ---
 ```
 
+### 任意キー: 解説の書式・用語集・出典の範囲
+
+```yaml
+style:                                      # 解説の書式の機械検査（check_style.py）。雛形で既定有効
+  explanation_markers:                      # 各 Explanation の冒頭の正誤印（完全な先頭一致）
+    correct: "正解です。"                   # false にすると正誤印の検査を止める
+    incorrect: "不正解です。"
+  require_space_after_source_url: true      # 出典 URL の直後に半角スペース
+  # option_translation_marker / question_translation_marker / body_sentence_end /
+  # translation_sentence_end は、問題文と解説の言語が違う講座（訳を併記）で使う
+glossary:                                   # 原語で書く用語と、使ってはいけない訳語（check_style.py）
+  - term: "<原語の用語>"
+    forbid: ["<和訳>", "<カタカナ音写>"]    # Domain 列以外の全カラムで部分一致 → FAIL
+    allow_context: ["<許す言い回し>"]       # 任意
+source_scope:                               # ドメインごとの出典の許可範囲（check_sources.py）
+  severity: warn                            # warn（既定）| fail
+  include_primary_sources: true
+  common:
+    - docs.example.com/product-a/
+  domains:
+    D4:
+      - docs.example.com/identity/
+```
+
+- **`style` が無い（または `{}`）と WARN。** それでも正誤印 x `Correct Answers` の整合だけは
+  既定の印（先頭が「正解」/「不正解」、英語なら Correct / Incorrect）で検査します。
+  正答の取り違えを落とす要なので、設定漏れで素通りさせません（実績: `style: {}` のまま運用し、
+  正誤印の欠落33件と「不正解。」「不正解です。」の混在が全検査 OK のまま残った）
+- **`glossary` は散文の方針の代わり。** 「製品名は原語のまま」と書くだけでは守られません
+  （実績: 300問で約400件の和訳・カタカナ化・直訳調が混入）。作問ブリーフの契約文
+  （`check_style.py --print-contract`）にも用語表が出ます
+- **`source_scope` は同じホストの別製品ページを出典にした問題を拾います。** 出典欠落・禁止ホスト・
+  到達確認はすべて通ってしまう欠陥クラスです（実績: 精読レビューまで2件残った）
+
 ### `mode: mixed` — 本ごとに問題数と配分が違う構成
 
 本番が大問題数の試験では「分野別演習でドメインを絞って深く → フル模試で横断」の
@@ -146,6 +186,9 @@ sections:
 5. `mock_exams >= 1` かつ `questions_per_exam >= 1`
 6. `mode: mixed` なら `sections` が存在し、各本の `domains` の合計が
    その本の `questions` と一致し、`domains[].id` が実在すること
+7. `glossary` があれば各要素が `term`（文字列）と `forbid`（空でない文字列のリスト）を持つこと
+8. `source_scope` があれば `severity` が warn / fail、各値がリスト、`domains` のキーが実在の
+   ドメイン id であること（判定は `check_sources.py` と共通）
 
 ## 対応ベンダーと調査レシピ
 
@@ -183,8 +226,25 @@ python scripts/check_option_balance.py section0*/quiz.csv
 # 出典 URL のロケール正規化（冪等）
 python scripts/normalize_urls.py section0*/quiz.csv
 
+# パートの結合（日本語と英数字の間の半角スペースの割れを警告。--normalize で多数派に揃える。
+# quiz.csv / quiz.raw.csv に _parts に無い手直しがあれば上書きせずに止まる。--force で上書き）
+python scripts/merge_parts.py section01-mock-exam-1 --keep-parts
+
+# 解説の整合・文体・訳・用語（正誤印 x Correct Answers / glossary の禁止訳語 / style の各規則）
+python scripts/check_style.py section0*/quiz.csv --sections sections.md
+python scripts/check_style.py --print-contract --sections sections.md   # 作問ブリーフの契約文
+
+# 出典の検査（欠落・禁止ホスト・source_scope の範囲外。--check-urls で到達確認）
+python scripts/check_sources.py section0*/quiz.csv --sections sections.md
+
 # 選択肢シャッフル（原本退避 + 最良シード自動走査 + 位置分布検証）
 python scripts/shuffle_options.py section01-mock-exam-1/quiz.csv
+python scripts/shuffle_options.py section01-mock-exam-1/quiz.csv --check-drift   # 原本とのずれを見るだけ
+python scripts/shuffle_options.py section01-mock-exam-1/quiz.csv --adopt         # quiz.csv の手直しを正とする
+
+# 文面修正の前後で、正解・配分・選択肢数・出典 URL・正誤印が不変か（精読レビューの後に通す）
+python scripts/check_invariants.py section0*/quiz.csv --sections sections.md    # 比較元は git HEAD
+python scripts/check_invariants.py section01-mock-exam-1/quiz.csv --show 1-5    # 1問ずつ全カラム表示
 
 # ドメイン配分・シラバス整合・本横断重複の検証
 python scripts/validate_exam.py --sections sections.md \
@@ -206,7 +266,11 @@ CSV の読み書きは `scripts/validate_quiz_csv.py` の `read_rows` / `write_r
 
 **判定ロジックをスクリプトに置く。** ドメイン配分・CSV 規約・重複・位置分布の判定は Python に実装して pytest で担保しています。エージェントの出力揺れに関係なく同じ基準が適用されます。スキルとエージェントはスクリプトを呼ぶだけで、検証ロジックを再実装しません。
 
-**シャッフルは最良シード自動走査。** 単一固定シードは当たり外れが大きく、実績として seed=42 が正解を1位置に 78.8% 偏らせました。原本 `quiz.raw.csv` を一度だけ退避して常に原本からシャッフルし（再シャッフルの罠の防止）、シードを走査して正解位置が最も均等になるものを採用します。
+**シャッフルは最良シード自動走査。** 単一固定シードは当たり外れが大きく、実績として seed=42 が正解を1位置に 78.8% 偏らせました。原本 `quiz.raw.csv` を退避して常に原本からシャッフルし（再シャッフルの罠の防止）、シードを走査して正解位置が最も均等になるものを採用します。
+
+**原本とずれていたら上書きせずに止まります（raw ドリフト）。** `quiz.csv` を後から手直しすると原本が古いまま残り、原本から再シャッフルすると手直しが黙って消えます（実績: ある講座の6本すべてで、訳語の修正が `quiz.csv` にだけ入っていた）。比較は選択肢の並び順に依存しない指紋で行い、**どの選択肢が正解かも含めます**（`Correct Answers` だけの修正も検出する）。どちらを直したかは内容から判定できないので、`--adopt`（`quiz.csv` を正として原本を作り直す）/ `--force`（原本を正として手直しを捨てる）を明示させます。`finalize_section.py` は結合の直後なので `--adopt` で呼び、手直しの消失は結合前の `merge_parts.py` の検査が防ぎます。
+
+**正誤印の判定は `check_style.py` と `check_invariants.py` で共通です。** 同じ解説を片方が通し片方が落とす食い違いを避けるため、判定関数（`marker_rule` / `read_verdict`）を1か所に置いています。
 
 **期待票数は「その位置を提供した問題」からのみ積む。** 4択中心に5/6択が混在しても、位置5・6が誤検知になりません。
 

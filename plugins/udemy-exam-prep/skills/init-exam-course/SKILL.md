@@ -101,11 +101,18 @@ OK: 8 created, 0 skipped
    - `source_titles` — `sources.md` に出すホストの表示名
    - `guide_citation` — Exam Guide だけが根拠の事実に使う出典表記
    - `max_per_concept` — 同一概念を何本まで再利用してよいか
+   - `style` — 解説の書式の機械検査。**雛形では正誤印と出典 URL 直後の空白を有効にしてある。**
+     消したり `{}` にしたりしない（正誤印の表記統一・訳・文体が検査されなくなり WARN が出る）。
+     問題文と解説の言語が違う講座は、コメントアウトしてある訳マーカーと文体の行を有効にする
+   - `glossary` — 原語で書く用語と使ってはいけない訳語。**製品名・サービス名・役割名のうち
+     和訳・カタカナ化されやすいものを作問前に列挙する。** 「原語のまま書く」という散文の
+     方針だけでは守られない（実績: 300問で約400件の和訳・カタカナ化が混入した）。
+     digest がそろった時点で追記してもよいが、**作問ブリーフの契約文を生成する前に確定させる**
 2. `AUTHOR-BRIEF.md` に**資格固有の方針**を書き足す（出題言語・用語表記・distractor の型）。
    機械検査される基準（§4-1 選択肢の長さ / §7-1 正解肢の文面）は変えない
 3. `research/AUTHORING-GUARDRAILS.md` は digest 作成後に埋める（[[create-section]] の Step 2 の後）
 
-front matter が読めることを確認します。
+front matter が読めることを確認します（`glossary` の形の誤りもここで検出されます）。
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/profile.py" sections.md
