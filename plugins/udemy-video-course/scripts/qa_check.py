@@ -5,6 +5,10 @@
 
 1. **TTS の異常**  合成音声は、まれに同じ文を繰り返したり（ループ）、途中で切れたり
    する。原稿の文字数から期待尺を出し、実尺との比で外れ値を落とす。
+   さらに、**音声の途中に長い無音が挟まる**異常（尺の比では帯の中に収まることがある）を
+   silencedetect で拾う。
+   → 静止画から組む回（モードB）は、`--audio-only` の**直後、`build_rec.py --audio-dir` の前**に
+     走らせる。異常な wav の尺がそのままフレームの尺になるため、組んでからでは遅い。
 2. **沈黙率**      区間の尺に対してナレーションが短すぎると「間が持たない」動画になる。
    逆に 5% を切ると喋りっぱなしで視聴者の目が追いつかない。
 3. **体言止め**    名詞で終わる文は TTS でぶつ切りに聞こえる。述語で言い切らせる。
@@ -34,6 +38,8 @@ DEFAULT_CPS = 5.7
 LOOP_RATIO, CUT_RATIO = 1.8, 0.62
 # 1秒あたりの文字数。この帯を外れると読み上げが異常に速い/遅い
 CPS_BAND = (3.0, 8.5)
+# 音声の途中の無音。これより長い無音が頭と末尾以外にあれば異常を疑う（句読点の間は 1 秒未満）
+INNER_SILENCE_SEC, SILENCE_DB = 2.0, -40
 
 SLIDE_RE = re.compile(r"^スライド\s*(\d+)\s*[:：]")
 REC_RE = re.compile(
@@ -72,6 +78,24 @@ def ffprobe_duration(path: Path) -> float | None:
         return float(out)
     except Exception:
         return None
+
+
+def inner_silences(path: Path, total: float) -> list[tuple[float, float]]:
+    """頭と末尾を除いた、INNER_SILENCE_SEC 以上の無音区間 [(start, 長さ)]。"""
+    try:
+        err = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af",
+             f"silencedetect=noise={SILENCE_DB}dB:d={INNER_SILENCE_SEC}", "-f", "null", "-"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace").stderr
+    except Exception:
+        return []
+    starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", err)]
+    durs = [float(x) for x in re.findall(r"silence_duration: ([\d.]+)", err)]
+    out = []
+    for st, du in zip(starts, durs):
+        if st > 0.3 and st + du < total - 0.3:
+            out.append((st, du))
+    return out
 
 
 def parse_transcript(path: Path):
@@ -133,6 +157,9 @@ def check_tts(segs, audio_dir: Path, cps: float):
             findings.append((seg["head"], f"途切れ疑い（実尺/期待尺={ratio:.2f}）"))
         elif not (CPS_BAND[0] <= chars_per_sec <= CPS_BAND[1]):
             findings.append((seg["head"], f"読み上げ速度が帯の外（{chars_per_sec:.1f}字/秒）"))
+        for st, du in inner_silences(wav, d):
+            findings.append((seg["head"],
+                             f"途中に長い無音（{st:.1f}s から {du:.1f}s）。wav を退避して再合成する"))
         if seg["kind"] == "rec":
             rec_span += seg["span"]
             rec_narr += d
