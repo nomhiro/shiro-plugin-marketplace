@@ -1,13 +1,13 @@
 ---
 name: create-udemy-course
-description: Udemy に演習テストコースを新規作成し、タイトル・サブタイトル・説明文・学習目的・メッセージ等の基本設定を Playwright MCP で自動入力する。sections.md の front matter と CLAUDE.md から情報を組み立てる。スラッシュコマンド `/udemy-exam-prep:create-udemy-course` または「Udemy にコース作って」で起動。
+description: Udemy に演習テストコースを新規作成し、タイトル・サブタイトル・説明文・学習目的・メッセージ等の基本設定をブラウザ操作（Claude in Chrome を第一手段、Playwright MCP を代替）で自動入力する。sections.md の front matter と CLAUDE.md から情報を組み立てる。スラッシュコマンド `/udemy-exam-prep:create-udemy-course` または「Udemy にコース作って」で起動。
 ---
 
 # create-udemy-course
 
-Playwright MCP を使って Udemy に演習テスト講座を作成し、基本設定を行うオーケストレータスキル。
+ブラウザ操作（Claude in Chrome を第一手段、Playwright MCP を代替）で Udemy に演習テスト講座を作成し、基本設定を行うオーケストレータスキル。
 
-実装の詳細（Playwright 操作、エラー処理）は [[udemy-bulk-upload]] に従います。このスキルはコース作成シナリオ固有の **入力整理** と **メッセージ生成** に集中します。
+実装の詳細（ブラウザ手段の選び方とツールの対応表、エラー処理）は [[udemy-bulk-upload]] に従います。以下の手順は Playwright のツール名（`browser_*`）で書いてある。Claude in Chrome では同スキルの対応表で読み替える。このスキルはコース作成シナリオ固有の **入力整理** と **メッセージ生成** に集中します。
 
 ## 起動例
 
@@ -19,8 +19,8 @@ Udemy にコース作って
 
 ## 前提条件
 
-- Playwright MCP が利用可能（プラグイン同梱）
-- Chrome ブラウザが閉じている（Playwright 起動の競合回避）
+- Claude in Chrome が接続済み（第一手段。ユーザーのログイン済み Chrome をそのまま使える）。使えなければ Playwright MCP（プラグイン同梱）
+- Playwright を使う場合のみ: Chrome ブラウザが閉じている（Playwright 起動の競合回避）。別プロファイルなのでログインはユーザーに依頼する
 - `sections.md`（front matter 含む）と `CLAUDE.md` が記入済み
 
 ## 動作モード
@@ -462,9 +462,12 @@ python -c "import io,sys; t=io.open(sys.argv[1],encoding='utf-8').read(); print(
 - 大きな画像（>2MB）は S3 multipart で失敗しやすい。PIL で 750×422 / JPEG quality 90 に正規化してから渡す
 - 画像にテキスト・第三者ロゴが含まれる場合はアップロード前にユーザーへ警告
 - **演習テストを追加するにはコースが有料設定済みである必要がある**
-- **審査提出と公開ボタンは押さない。** ここは人が判断する工程
+- **公開方針はプロジェクトの `CLAUDE.md` を優先して読む。** ユーザーの承認のうえで審査提出・公開を
+  自動化の対象に変えているプロジェクトがある（`CLAUDE.md` の方針欄に変更日とともに書かれている）。
+  その記載があればそれに従って押してよい。**記載がなければ、審査提出と公開ボタンは押さない。**
+  ここは人が判断する工程（[[upload-practice-tests]] と同じ方針）
 
 ## 関連スキル
 
-- [[udemy-bulk-upload]] — Playwright 操作レシピ
+- [[udemy-bulk-upload]] — ブラウザ操作レシピ（Claude in Chrome / Playwright）
 - [[upload-practice-tests]] — 既存コースへのテストアップロード

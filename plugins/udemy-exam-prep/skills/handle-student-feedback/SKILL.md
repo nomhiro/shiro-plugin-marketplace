@@ -23,8 +23,8 @@ description: 受講者の Q&A・レビュー・メッセージで、問題や解
    - 機械検査を全問にかける: `python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" <quiz.csv>`（Markdown 記法、選択肢の番号参照。改行は警告）と、[[exam-validator]] の検証
    - 同一試験内で同じ概念を2問で出していないかも見る
 4. **CSV を修正する**: 修正は差分（PATCH の JSON）にし、選択肢数・正解数・出典 URL・解説の正誤宣言と `Correct Answers` の矛盾を機械検証してから適用する。適用後に検証を通し、question-bank.md と sources.md を同期する
-5. **Udemy に反映する**: [[udemy-bulk-upload]]「多数の問題を書き換える」。全問を `audit` で CSV と照合する
-6. **公開する**: 更新メッセージを入れて公開する（[[udemy-bulk-upload]]「公開」）
+5. **Udemy に反映する**: [[udemy-bulk-upload]]「多数の問題を書き換える」（Claude in Chrome を第一手段に、1本ずつ・1タブで）。全問を `auditBg` で CSV と照合する
+6. **公開する**: 更新メッセージを入れて公開する（[[udemy-bulk-upload]]「公開」）。`udemy-course-meta.md` の更新履歴に、日付・内容・検証結果・更新メッセージを追記する（[[upload-practice-tests]]「更新履歴を残す」）
 7. **返信する**: 指摘ごとに、公開が済んでから返信する
 
 ## 返信の書き方
@@ -50,7 +50,7 @@ description: 受講者の Q&A・レビュー・メッセージで、問題や解
 | Udemy の公開 | 受講者に見える |
 | Q&A への返信 | 公開の発言になる |
 
-ユーザーが「公開して返信して」のように事前に指示している場合は、その範囲で進めてよい。
+ユーザーが「公開して返信して」のように事前に指示している場合は、その範囲で進めてよい。Udemy の公開は、プロジェクトの `CLAUDE.md` が公開を自動化の対象にしていればそれに従う。
 
 ## 関連スキル
 

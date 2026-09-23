@@ -14,7 +14,7 @@
       "name": "udemy-exam-prep",
       "source": "./plugins/udemy-exam-prep",
       "description": "認定資格の試験対策問題集（Udemy 演習テスト講座）を、公式ドキュメント調査からフル模試生成・Udemy へのアップロードまで一貫して作成するハーネス",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "author": {
         "name": "nomhiro"
       },

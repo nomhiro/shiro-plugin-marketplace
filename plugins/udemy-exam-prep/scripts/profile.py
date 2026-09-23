@@ -67,6 +67,8 @@ def validate_profile(profile: dict) -> list[str]:
     if vendor is not None and vendor not in VENDORS:
         errs.append(f"vendor '{vendor}' は未対応。{VENDORS} のいずれかにする")
 
+    errs.extend(_validate_glossary(profile))
+
     mode = profile.get("mode")
     if mode is not None and mode not in MODES:
         errs.append(f"mode '{mode}' は未対応。現状 {MODES} のみサポート")
@@ -117,6 +119,54 @@ def validate_profile(profile: dict) -> list[str]:
     if profile.get("mode") == "mixed":
         errs.extend(_validate_sections(profile, seen, total))
 
+    errs.extend(_validate_source_scope(profile))
+
+    return errs
+
+
+def _validate_source_scope(profile: dict) -> list[str]:
+    """任意キー `source_scope` の形を検証する（未知のドメイン id・非リスト・severity 不正）。
+
+    判定は check_sources.py の `load_scope` と共通にする（検証の定義元を1つにする。
+    二重に書くと、片方だけ通って片方で落ちる食い違いが起きる）。
+    domains が確定してから呼ぶ（未知 id の判定に domains が要るため）。
+    """
+    if profile.get("source_scope") is None:
+        return []
+    # check_sources は profile を import するので、循環を避けて関数内で import する
+    from scripts.check_sources import load_scope
+
+    _, errs = load_scope(profile)
+    return errs
+
+
+def _validate_glossary(profile: dict) -> list[str]:
+    """任意キー `glossary` の形を検証する。無ければ何もしない。"""
+    raw = profile.get("glossary")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        return ["glossary はリストにする（要素は term / forbid を持つマッピング）"]
+    errs = []
+    for i, item in enumerate(raw, 1):
+        if not isinstance(item, dict):
+            errs.append(f"glossary[{i}] がマッピングではない")
+            continue
+        term = item.get("term")
+        if not isinstance(term, str) or not term.strip():
+            errs.append(f"glossary[{i}]: term（原語で書く用語）が空")
+        forbid = item.get("forbid")
+        if (
+            not isinstance(forbid, list) or not forbid
+            or not all(isinstance(x, str) and x.strip() for x in forbid)
+        ):
+            errs.append(f"glossary[{i}] '{term}': forbid は空でない文字列のリストにする")
+        allow = item.get("allow_context")
+        if allow is not None and (
+            not isinstance(allow, list)
+            or not all(isinstance(x, str) and x.strip() for x in allow)
+        ):
+            errs.append(f"glossary[{i}] '{term}': allow_context は文字列のリストにする")
     return errs
 
 
@@ -217,6 +267,34 @@ def forbidden_sources(profile: dict) -> dict[str, str]:
             out[str(item["host"]).strip()] = str(item.get("reason", "")).strip()
         elif isinstance(item, str):
             out[item.strip()] = ""
+    return out
+
+
+def glossary(profile: dict) -> list[dict]:
+    """原語で書く用語と、使ってはいけない訳語の一覧。任意キー `glossary` から読む。
+
+    要素は `term`（原語で書く用語）/ `forbid`（使ってはいけない表記のリスト。
+    部分一致）/ `allow_context`（任意。forbid を含むが許す言い回し）。
+    形の壊れた要素は捨てる（検証は `validate_profile` が行う）。
+
+    散文の「原語のまま書く」は守られない。実績: 方針に明記していたのに
+    ある講座の300問で約400件の和訳・カタカナ化・直訳調が混入した。
+    """
+    out: list[dict] = []
+    raw = profile.get("glossary")
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        term = str(item.get("term") or "").strip()
+        forbid = [str(x).strip() for x in (item.get("forbid") or []) if str(x).strip()]
+        if not term or not forbid:
+            continue
+        allow = [
+            str(x).strip() for x in (item.get("allow_context") or []) if str(x).strip()
+        ]
+        out.append({"term": term, "forbid": forbid, "allow_context": allow})
     return out
 
 

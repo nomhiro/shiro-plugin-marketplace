@@ -40,27 +40,64 @@ scenario_ratio_min: "30%"
 max_per_concept: 2
 # 非シナリオ型（scenario_ratio_min の分母から除く型）。既定は knowledge のみ
 non_scenario_codes: ["knowledge"]
-# 解説の整合・文体・訳の検査（check_style が読む。この節を消すと検査はスキップされる）
+# 解説の整合・文体・訳の検査（check_style が読む）
 #
 # 形式検証は「正解番号が誤答肢を指している」を検出できない。解説の冒頭に
 # 正誤の印を書く運用にしておけば、印と Correct Answers の突き合わせで落とせる。
-# body_sentence_end は「解説本体が満たすべき文末」、translation_sentence_end は
-# 「訳が満たしてはいけない文末」として使う（例: 本体=ですます調 / 訳=常体）。
-style: {}
-#   explanation_markers:
-#     correct: "正解です。"
-#     incorrect: "不正解。"
-#   option_translation_marker: "【訳】"
-#   question_translation_marker: "【設問の訳】"
-#   body_sentence_end: "(です|ます|ません|ました|でした|でしょう|ください)(か|ね|よ)?$"
-#   translation_sentence_end: "(です|ます|ません|ました|でした|でしょう|ください)(か|ね|よ)?$"
-#   require_space_after_source_url: true
-#   skip_sentence_pattern: "出典|参考|https?://"
+# **既定で有効にしておく。** この節を消す・`style: {}` にすると、正誤印は既定の
+# 「正解 / 不正解」で正誤だけが検査され、表記の統一（「不正解。」と「不正解です。」の
+# 混在）・訳・文体・出典 URL の空白は検査されない（WARN が出る）。
+# 実績: `style: {}` のまま運用した講座で正誤印の欠落33件と表記の混在が素通りした。
+# 印を書かない講座だけ `explanation_markers: false` で明示的に止める。
+style:
+  explanation_markers:
+    correct: "正解です。"
+    incorrect: "不正解です。"
+  require_space_after_source_url: true
+  skip_sentence_pattern: "出典|参考|https?://"
+  # 問題文を英語・解説を日本語にする講座（訳を併記する構成）で有効にする。
+  # body_sentence_end は「解説本体が満たすべき文末」、translation_sentence_end は
+  # 「訳が満たしてはいけない文末」として使う（例: 本体=ですます調 / 訳=常体）。
+  # option_translation_marker: "【訳】"
+  # question_translation_marker: "【設問の訳】"
+  # body_sentence_end: "(です|ます|ません|ました|でした|でしょう|ください)(か|ね|よ)?$"
+  # translation_sentence_end: "(です|ます|ません|ました|でした|でしょう|ください)(か|ね|よ)?$"
+# 原語で書く用語と、使ってはいけない訳語（check_style が Domain 列以外の全カラムで検査する）
+#
+# CLAUDE.md に「製品名・サービス名は原語のまま」と書くだけでは守られない。
+# 実績: ある講座の300問で約400件の和訳・カタカナ化・直訳調が混入した
+# （製品名の和訳、役割名の漢語訳、一般語への誤訳など）。
+# 用語集は作問ブリーフの契約文にも出る（check_style.py --print-contract）。
+#   term          … 原語で書く用語（推奨表記）
+#   forbid        … 使ってはいけない表記のリスト（部分一致。和訳・カタカナ音写・直訳調）
+#   allow_context … 任意。forbid を含むが許す言い回し（一般語として正しい用法など）
+glossary: []
+#   - term: "<原語の製品名>"
+#     forbid: ["<和訳>", "<カタカナ音写>"]
+#   - term: "<原語の役割名>"
+#     forbid: ["<漢語訳>"]
+#     allow_context: ["<一般語として正しい言い回し>"]
 # Exam Guide だけが根拠の事実に使う出典表記（make_sources_md / check_sources が読む）
 guide_citation: 公式 Exam Guide（{{CERT_ID}}）
 # 出典に使ってはいけないホスト（check_sources / audit_course が読む）
 # 受験申込の製品ページ・転送される旧ホストなど、クリックしても何も得られないものを挙げる
 forbidden_sources: []
+# 出典のドキュメント領域をドメインごとに制限する（check_sources が読む。任意）
+#
+# ホストが同じでも別製品のページを出典にした問題は、出典欠落・禁止ホスト・到達確認の
+# どれにも引っかからない（実績: 精読レビューまで2件残った）。許可する URL 接頭辞を
+# 宣言すると、範囲外の出典を WARN（severity: fail なら FAIL）にする。
+# 接頭辞は「ホスト/パス」（スキーム省略可・パスはセグメント単位で比較）。
+# 許可リストが空のドメインは検査しない。未知のドメイン id・リストでない値・
+# severity の誤りは profile.py の検証で FAIL になる。
+# source_scope:
+#   severity: warn                  # warn（既定）| fail
+#   include_primary_sources: true   # primary_sources[].scope / url 中の URL を全ドメイン共通で許可
+#   common:                         # 全ドメイン共通で許可する接頭辞
+#     - docs.example.com/product-a/
+#   domains:                        # ドメイン id ごとに追加で許可する接頭辞
+#     D4:
+#       - docs.example.com/identity/
 # sources.md に出すホストの表示名（make_sources_md が読む）
 # 形式: code.example.com: 製品ドキュメント
 source_titles: {}

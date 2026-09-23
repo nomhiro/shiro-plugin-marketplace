@@ -163,3 +163,44 @@ def test_guardrails_name_the_duplications_that_pass_every_check(tmp_path):
     # 再利用が許容される4条件がそろっているか
     for cond in ("max_per_concept", "シナリオ", "構造から違う", "症状"):
         assert cond in text, cond
+
+
+# --- style を既定で有効に・glossary の差し込み口 -----------------------------
+#
+# 実績: 雛形が `style: {}` だったため check_style が黙って SKIP し、
+# 正誤印の欠落33件と「不正解。」「不正解です。」の混在が素通りした。
+# また「原語のまま書く」という散文の方針だけでは300問で約400件の
+# 和訳・カタカナ化が混入した。
+
+def test_expanded_sections_md_enables_style_by_default(tmp_path):
+    from scripts.check_style import load_style, marker_rule
+    init_course(tmp_path, VALUES)
+    style = load_style(tmp_path / "sections.md")
+    assert style, "style が空だと正誤印の表記統一が検査されない"
+    rule = marker_rule(style)
+    assert rule and rule["strict"]
+    assert style["require_space_after_source_url"] is True
+
+
+def test_expanded_sections_md_has_an_empty_glossary_slot(tmp_path):
+    from scripts.check_style import load_glossary
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "sections.md").read_text(encoding="utf-8")
+    assert "glossary:" in text and "forbid" in text
+    # 雛形に実在の用語を入れない（資格非依存）
+    assert load_glossary(tmp_path / "sections.md") == []
+
+
+def test_contract_can_be_generated_from_the_expanded_template(tmp_path):
+    from scripts.check_style import contract_text, load_glossary, load_style
+    init_course(tmp_path, VALUES)
+    t = contract_text(load_style(tmp_path / "sections.md"),
+                      load_glossary(tmp_path / "sections.md"))
+    assert "正解です。" in t and "不正解です。" in t
+
+
+def test_brief_tells_authors_to_obey_the_glossary(tmp_path):
+    init_course(tmp_path, VALUES)
+    text = (tmp_path / "AUTHOR-BRIEF.md").read_text(encoding="utf-8")
+    assert "glossary" in text and "forbid" in text
+    assert "SKIP でも可" not in text

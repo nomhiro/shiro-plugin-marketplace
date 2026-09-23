@@ -7,7 +7,7 @@ SKILLS = PLUGIN / "skills"
 EXPECTED = {
     "init-exam-course", "create-sections", "create-section", "create-udemy-course",
     "upload-practice-tests", "quiz-csv-format", "research-cert-docs",
-    "udemy-bulk-upload", "handle-student-feedback",
+    "udemy-bulk-upload", "handle-student-feedback", "review-section",
 }
 # 汎用化したのに AI-103 固有の記述が残っていたら退行。
 # ベンダー別レシピ表の中の製品名（例: "Azure AI Search hybrid search" という検索クエリ例）は
@@ -67,6 +67,7 @@ def test_scripts_are_called_through_plugin_root():
         "create-sections": "profile.py",
         "upload-practice-tests": "validate_quiz_csv.py",
         "udemy-bulk-upload": "validate_quiz_csv.py",
+        "review-section": "check_invariants.py",
     }
     for skill, script in callers.items():
         text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
@@ -116,9 +117,23 @@ def test_udemy_skills_refuse_to_enter_credentials():
 
 
 def test_skills_do_not_press_publish():
+    """公開はプロジェクトの CLAUDE.md の方針が優先。記載がなければ押さない既定は残す。
+
+    無条件の「押さない」は、ユーザー承認のうえで公開を自動化対象にしたプロジェクトと
+    食い違った。一方で既定（記載なし）で押してしまうと、受講者に見える操作を無断で行う。
+    """
     for skill in ("create-udemy-course", "upload-practice-tests"):
         text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
-        assert "公開ボタンは押さない" in text, skill
+        assert "公開方針はプロジェクトの `CLAUDE.md` を優先して読む" in text, skill
+        assert "記載がなければ、審査提出と公開ボタンは押さない" in text, skill
+        assert "- **審査提出と公開ボタンは押さない。**" not in text, skill   # 無条件の旧記述
+
+
+def test_upload_reads_the_project_publish_policy_first():
+    """プロジェクトの CLAUDE.md で公開を自動化対象に変えている場合があり、スキルの既定と食い違った。"""
+    text = _skill("upload-practice-tests")
+    assert "公開方針はプロジェクトの `CLAUDE.md` を優先して読む" in text
+    assert "記載がなければ、審査提出と公開ボタンは押さない" in text
 
 
 # --- 実測で踏んだ罠がスキルに残っているか ----------------------------------
@@ -166,3 +181,34 @@ def test_course_messages_have_a_documented_length_limit():
 
 def test_snapshot_filename_must_stay_inside_the_allowed_roots():
     assert "allowed roots" in _skill("create-udemy-course")
+
+
+# --- 精読レビュー（R3 後の任意工程） ----------------------------------------
+
+def test_review_section_runs_every_post_fix_check():
+    text = _skill("review-section")
+    for script in ("check_invariants.py", "validate_quiz_csv.py", "validate_exam.py"):
+        assert f"${{CLAUDE_PLUGIN_ROOT}}/scripts/{script}" in text, script
+    assert "write_rows" in text
+
+
+def test_review_section_keeps_the_lessons_from_the_first_run():
+    """機械スキャンだけでは拾えなかった実績と、共通シート・抜き取り照合の要点を固定する。"""
+    text = _skill("review-section")
+    assert "なぜ機械スキャンだけで済ませないか" in text
+    assert "約400件" in text
+    for kind in ("A:", "B:", "C:"):
+        assert kind in text, kind
+    assert "| 問題# | カラム | 原文抜粋 | 種別 | 推奨修正 | 要確認 |" in text
+    assert "全エージェントに同一のテキスト" in text
+    assert "英語ラベルを創作しない" in text
+    assert "抜き取りで機械照合" in text
+    assert "再シャッフルしない" in text
+
+
+def test_create_section_points_to_review_and_invariants():
+    text = _skill("create-section")
+    assert "[[review-section]]" in text
+    assert "check_invariants.py" in text
+    assert "source_scope" in text
+    assert "raw ドリフト" in text

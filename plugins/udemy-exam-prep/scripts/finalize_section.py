@@ -5,22 +5,25 @@
 （シャッフル後に内容修正が必要になると原本からの再シャッフルで手戻りになる）。
 
 工程:
-  1. パートを結合して quiz.csv を作る（配分・Domain 列・meta 行数を検証）
+  1. パートを結合して quiz.csv を作る（配分・Domain 列・meta 行数を検証。
+     quiz.csv / quiz.raw.csv に _parts に無い手直しがあれば上書きせずに止める。
+     日本語と英数字の間の半角スペースの割れを警告する）
   2. CSV 整合性の検証
-  2.5 解説の整合・文体・訳（正誤印 x Correct Answers など）
+  2.5 解説の整合・文体・訳・用語（正誤印 x Correct Answers・glossary の禁止訳語など）
   3. 出典の検査（認定ページ・旧ホストの混入、出典の欠落）
   4. 正解肢の長さバイアス検出（margin。内容修正が必要なのでシャッフル前に置く）
   5. 出典 URL のロケール正規化（冪等）
   6. ドメイン配分の検証（question-bank 追記前）
   7. question-bank.md に追記
   8. 本横断の重複検証
-  9. 選択肢シャッフル（原本退避 + 最良シード自動走査 + MC/MS 両方の分布検証）
+  9. 選択肢シャッフル（原本の作り直し + 最良シード自動走査 + MC/MS 両方の分布検証）
  10. シャッフル後の CSV 再検証
  11. 統計レポート
 
 使い方:
     python "${CLAUDE_PLUGIN_ROOT}/scripts/finalize_section.py" section02-mock-exam-2
     python "${CLAUDE_PLUGIN_ROOT}/scripts/finalize_section.py" section02-mock-exam-2 --check-urls
+    python "${CLAUDE_PLUGIN_ROOT}/scripts/finalize_section.py" section02-mock-exam-2 --normalize-spacing
 """
 from __future__ import annotations
 
@@ -145,19 +148,33 @@ def main(argv: list[str]) -> int:
         "--check-urls", action="store_true",
         help="出典 URL に実際にアクセスして 200 を確認する（時間がかかる）",
     )
+    ap.add_argument(
+        "--normalize-spacing", action="store_true",
+        help="結合時に日本語と英数字の間の半角スペースを多数派に揃える（merge_parts --normalize）",
+    )
+    ap.add_argument(
+        "--force", action="store_true",
+        help="quiz.csv / quiz.raw.csv に _parts に無い手直しがあっても結合で上書きする",
+    )
     a = ap.parse_args(argv[1:])
 
     section = Path(a.section)
     quiz = str(section / "quiz.csv")
     bank = Path(a.bank)
 
-    run("1. パートの結合", [str(HERE / "merge_parts.py"), a.section,
-                           "--sections", a.sections, "--keep-parts"])
+    merge_argv = [str(HERE / "merge_parts.py"), a.section,
+                  "--sections", a.sections, "--keep-parts"]
+    if a.normalize_spacing:
+        merge_argv.append("--normalize")
+    if a.force:
+        merge_argv.append("--force")
+    run("1. パートの結合", merge_argv)
     run("2. CSV 整合性", [str(HERE / "validate_quiz_csv.py"), quiz])
     # 形式検証では検出できない欠陥（正解番号が誤答肢を指している・訳の欠落・
-    # 文体の混在・出典 URL の詰め書き）をここで落とす。内容修正を伴うため
-    # シャッフルより前に置く。front matter に style が無ければ自動でスキップ。
-    run("2.5 解説の整合・文体・訳",
+    # 文体の混在・出典 URL の詰め書き・glossary の禁止訳語）をここで落とす。
+    # 内容修正を伴うためシャッフルより前に置く。front matter に style が無くても
+    # 正誤印の整合は既定の印で検査する（WARN を出す）。
+    run("2.5 解説の整合・文体・訳・用語",
         [str(HERE / "check_style.py"), quiz, "--sections", a.sections])
 
     src_argv = [str(HERE / "check_sources.py"), quiz, "--sections", a.sections]
@@ -181,8 +198,10 @@ def main(argv: list[str]) -> int:
     run("8. 本横断の重複検証",
         [str(HERE / "validate_exam.py"), "--sections", a.sections,
          "--bank", str(bank), quiz])
+    # 工程1で quiz.csv を結合し直した直後なので、原本は quiz.csv から作り直す
+    # （--adopt）。手直しが消えないことは工程1の結合前の検査が保証している。
     run("9. 選択肢シャッフル",
-        [str(HERE / "shuffle_options.py"), quiz, "--max-seed", str(a.max_seed)])
+        [str(HERE / "shuffle_options.py"), quiz, "--max-seed", str(a.max_seed), "--adopt"])
     run("10. シャッフル後の CSV 再検証", [str(HERE / "validate_quiz_csv.py"), quiz])
 
     report(section, bank)

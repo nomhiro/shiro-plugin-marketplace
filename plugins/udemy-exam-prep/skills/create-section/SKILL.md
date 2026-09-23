@@ -116,8 +116,9 @@ grep -c '^| .* | D[0-9]' research/AUTHORING-GUARDRAILS.md
 
 ### Step 2.6: 作問ブリーフの文体契約を生成する（初回のみ・必須）
 
-`sections.md` front matter に `style` がある講座では、**機械検査される解説の書式を
-`AUTHOR-BRIEF.md` の §5-1 に貼り込む。**
+`style` の有無に関係なく**必ず生成して `AUTHOR-BRIEF.md` の §5-1 に貼り込む**
+（正誤印の既定検査と `glossary` の禁止訳語は、`style` が無くても常に機械検査されるため）。
+**`glossary` を確定させてから生成する。** 後から用語を足したら再生成して §5-1 を貼り替える。
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/check_style.py" --print-contract --sections sections.md
@@ -337,6 +338,16 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/finalize_section.py" <folder>
 python "${CLAUDE_PLUGIN_ROOT}/scripts/merge_parts.py" <folder> --keep-parts
 ```
 
+`merge_parts.py` は**日本語と英数字の間の半角スペースの有無**が割れていると WARN を出す
+（行ごとに判定し、少数派の行範囲をパート別に表示する。実績: 分割作問の前半25問と後半25問で
+癖が割れた）。`--normalize` で多数派に揃う（パート CSV にも書き戻す。URL・バッククォート内・
+`Domain` 列は触らず、URL 直後の半角スペースは消さない）。`finalize_section.py --normalize-spacing`
+でも同じ。表記が割れたまま結合すると、講座内の表記ゆれとして後工程まで残るので、ここで揃える。
+
+**結合し直すと消える手直しがあれば止まる。** `quiz.csv` / `quiz.raw.csv` に `_parts` に無い
+手直しがあると、`merge_parts.py`（と `finalize_section.py`）は上書きせずに FAIL する。
+手直しを `_parts/<ドメイン>.csv` に反映して結合し直すのが正。捨ててよいときだけ `--force`。
+
 CSV 整合性を検証する。
 
 ```bash
@@ -350,14 +361,31 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" <folder>/quiz.csv
 python "${CLAUDE_PLUGIN_ROOT}/scripts/check_style.py" <folder>/quiz.csv --sections sections.md
 ```
 
-front matter に `style` が無ければ自動でスキップされる。設定すると
-正誤印 x `Correct Answers` の整合・訳マーカーの有無・解説本体と訳の文体・
-出典 URL 直後の半角スペースを検査する。
+正誤印 x `Correct Answers` の整合は、front matter に `style` が無くても**既定の印で検査される**
+（`style` の設定漏れで正答の取り違えを素通りさせないため）。`style` を設定すると、
+印の表記の統一・訳マーカーの有無・解説本体と訳の文体・出典 URL 直後の半角スペースも検査する。
+front matter に `glossary`（原語で書く用語と禁止訳語）があれば、`Domain` 列以外の全カラムで
+禁止訳語を FAIL にする（行番号・カラム・該当語・推奨原語を出す）。
+`style` が無いと WARN が出る（検査は既定の正誤印だけになる）ので、雛形の `style` を有効にする。
 
-出典を検査する（出典の欠落と、front matter の `forbidden_sources` に挙げたホストの混入）。
+出典を検査する（出典の欠落、front matter の `forbidden_sources` に挙げたホストの混入、
+`source_scope` があればドメインのドキュメント領域外の出典）。
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/check_sources.py" <folder>/quiz.csv --sections sections.md
+```
+
+`source_scope` はドメインごとに許可する URL 接頭辞の宣言で、範囲外は WARN（`severity: fail` で FAIL）。
+**ホストが同じでも別製品のページを出典にした問題は、欠落・禁止ホスト・リンク切れのどの検査も通る**
+（実績: ある講座で2件、精読レビューまで残った）。WARN は [[exam-validator]] の検証5で1問ずつ見分ける。
+
+```yaml
+source_scope:
+  severity: warn                  # warn（既定）| fail
+  include_primary_sources: true   # primary_sources の URL を全ドメイン共通で許可
+  common: [docs.example.com/product-a/]
+  domains:
+    D4: [docs.example.com/identity/]
 ```
 
 **正解肢の長さバイアスを検査する。内容修正を伴うので必ずシャッフル前に通す。**
@@ -380,6 +408,7 @@ exam-validator は以下を検証する。
 3. **問題タイプ比率** — front matter の `question_types` の範囲に入るか
 4. **シラバス外検出** — ブループリント外・Out-of-Scope の問題を `removed-questions.md` に退避
 5. **本横断の重複** — `question-bank.md` の既出 `(task_statement, tested_concept)` との突き合わせ
+6. **出典の範囲と正答の食い違い** — `source_scope` 外の出典を、許可リストの漏れか別製品の出典かに見分け、出典と正答が食い違う疑いを報告
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_exam.py" --sections sections.md \
@@ -390,7 +419,11 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_exam.py" --sections sections.md \
 
 > **品質ゲートはシャッフル（Step 7）前に通すこと。** distractor 無し・タイプ比率不足は内容修正を伴うため、シャッフル後に発覚すると原本 `quiz.raw.csv` 修正＋再シャッフルの手戻りになる（実績あり）。Step 5 で必ず確定させる。
 
-> **微小な外科的 CSV 修正はオーケストレータが直接行う。** distractor 化のために1選択肢を誤答へ書き換える・`Domain` セルを再タグするといった機械的修正は、サブエージェントに委譲せずオーケストレータが Python で直接編集してよい。サブエージェントは安全機構により「コーディネーター経由の承認」を受け付けず作業を拒否して停止することがある（実績あり）。判断不要の小修正で round-trip を増やさない。原本 `quiz.raw.csv` が既にある場合はそちらを編集し、Step 7 を再実行して反映する。
+> **微小な外科的 CSV 修正はオーケストレータが直接行う。** distractor 化のために1選択肢を誤答へ書き換える・`Domain` セルを再タグするといった機械的修正は、サブエージェントに委譲せずオーケストレータが Python で直接編集してよい。サブエージェントは安全機構により「コーディネーター経由の承認」を受け付けず作業を拒否して停止することがある（実績あり）。判断不要の小修正で round-trip を増やさない。シャッフル後に直すときは次のいずれかにする。どれを選ぶかは `shuffle_options.py <folder>/quiz.csv --check-drift`（読むだけ）で原本との差分を見て決める。
+> (a) `_parts/<ドメイン>.csv` を直して `finalize_section.py` を再実行する（推奨）
+> (b) `quiz.csv` を直して `shuffle_options.py <folder>/quiz.csv --adopt`（手直しを正として原本を作り直してから混ぜ直す）
+> (c) 原本 `quiz.raw.csv` を直して `shuffle_options.py <folder>/quiz.csv --force`（`quiz.csv` 側の差分を捨てて原本から混ぜ直す）
+> [[review-section]] の修正は `quiz.csv` にだけ入っているので、混ぜ直すなら必ず (b)。
 
 ### Step 6: 出典URLの正規化（機械的）
 
@@ -410,7 +443,10 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/shuffle_options.py" <folder>/quiz.csv
 
 このスクリプトは次を行う。
 
-1. 原本 `<folder>/quiz.raw.csv` を**一度だけ**退避する（既にあれば触らない）
+1. 原本 `<folder>/quiz.raw.csv` が無ければ退避する。原本とのずれ（raw ドリフト: 正解の入れ替えを
+   含む、シャッフルでは説明できない差分）があれば**上書きせずに止まり**、`--adopt`（`quiz.csv` を正と
+   する）/ `--force`（原本を正とする）の指定を求める。`finalize_section.py` は結合の直後なので
+   `--adopt` で呼ぶ（手直しが消えないことは結合前の検査が保証する）
 2. 常に**原本から**シャッフルする
 3. シード1〜500を走査し、正解位置の最悪相対偏差が最小のシードを採用する
 4. 位置ごとの実測票数と期待票数を表示する
@@ -420,6 +456,12 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/shuffle_options.py" <folder>/quiz.csv
 - 単一固定シードは使わない。**実績として seed=42 が正解を1位置に 78.8% 偏らせた**
 - `quiz.raw.csv` は意図的に残す（再ロール用）。Step 9 のクリーンアップでも削除しない
 - 偏りが残る場合は `--max-seed 2000` に広げる。それでもダメなら選択肢数のばらつきや正解選択肢の表現を見直す
+- **`quiz.csv` を手直しした後に原本から再シャッフルすると、手直しが黙って消える。** `shuffle_options.py` は
+  `quiz.csv` の内容が `quiz.raw.csv` のシャッフルでは説明できない（raw ドリフト。`Correct Answers`
+  だけの修正も含む）と検知して止まる。止まったら、**手直しを残すなら `--adopt`**（`quiz.csv` から
+  原本を作り直してから混ぜ直す）。**`--force` は原本を正として手直しを捨てる**ので、原本側を直した
+  ときにだけ使う。混ぜ直す必要がなければ再シャッフルしない（[[review-section]] の修正後はこれが既定）。
+  差分の確認だけなら `--check-drift`（何も書かない）
 
 ### Step 8: 分布検証（独立再検証）と sources.md
 
@@ -555,7 +597,23 @@ section{N} の問題集生成パイプラインが完了しました。
 - 正解位置分布（採用シードと偏差）
 - `question-bank.md` に追記した問題数
 - 出力ファイル
-- 次ステップ: 他の模試も作成するか / Udemy アップロードに進むか
+- 次ステップ: 他の模試も作成するか / 精読レビュー（[[review-section]]）に進むか / Udemy アップロードに進むか
+
+### Step 12（任意）: 精読レビュー → 不変条件の検査
+
+R3 承認後・アップロード前に、全問を1問ずつ読む精読レビューを行う（`/udemy-exam-prep:review-section <N|all>`）。
+**機械検査をすべて通った講座でも、製品名の和訳・直訳調の日本語・別製品の出典は残る**
+（実績: 全検査 OK の6本300問を精読して約400件見つかった）。出題言語と出典の言語が違う講座では実施を推奨する。
+
+精読の指摘で `quiz.csv` を直したら、修正前（git HEAD または修正前のコピー）と比べて
+正解・配分・選択肢数・出典・正誤印が動いていないことを検査する。
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/check_invariants.py" <folder>/quiz.csv --sections sections.md
+python "${CLAUDE_PLUGIN_ROOT}/scripts/check_invariants.py" <folder>/quiz.csv --base <修正前のコピー>   # git 管理外
+```
+
+手順の詳細（精読エージェントへの指示テンプレート・A/B/C 分類・統一表記シート・要確認の扱い）は [[review-section]]。
 
 ## 引数
 
@@ -585,5 +643,6 @@ section{N} の問題集生成パイプラインが完了しました。
 - 調査エージェント: [[doc-researcher]]
 - 起草エージェント: [[question-author]]（解説スタイル内包）
 - 検証エージェント: [[exam-validator]]
+- 精読レビュー（R3 後の任意工程）: [[review-section]]
 - [[quiz-csv-format]] — CSV 規約
 - [[research-cert-docs]] — 調査レシピ

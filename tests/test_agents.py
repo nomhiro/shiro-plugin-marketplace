@@ -114,3 +114,10 @@ def test_exam_validator_owns_the_question_bank():
     text = (AGENTS / "exam-validator.md").read_text(encoding="utf-8")
     assert "あなただけの責務" in text
     assert "BANK_FIELDS" in text
+
+
+def test_question_author_obeys_the_glossary():
+    """散文の「原語のまま」だけでは守られない（実績: 300問で約400件の和訳が混入）。"""
+    text = (AGENTS / "question-author.md").read_text(encoding="utf-8")
+    assert "glossary" in text and "forbid" in text
+    assert "check_style.py" in text

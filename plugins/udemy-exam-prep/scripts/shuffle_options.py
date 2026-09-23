@@ -4,13 +4,24 @@ LLM が生成した quiz.csv は正解が特定位置（特に2番目）に強�
 **単一固定シードは当たり外れが大きい**（実績: seed=42 が MC の 78.8% を1位置に
 偏らせた）。そこで:
 
-  (a) 原本 quiz.raw.csv を一度だけ退避し、シャッフルは常に原本から行う
+  (a) 原本 quiz.raw.csv を退避し、シャッフルは常に原本から行う（原本とずれたら止まる。後述）
       （quiz.csv を読んで quiz.csv に書き戻すと再ロール時に「一度混ぜた後」を
         再シャッフルしてしまい再現性が壊れる = 再シャッフルの罠）
   (b) 複数シードを走査し、正解位置が最も均等になるシードを自動選択する
 
 期待票数は「その位置を実際に提供した問題」からのみ算出する。4択中心に5/6択が
 混在しても位置5・6が誤検知にならない。
+
+**原本と quiz.csv のずれ（raw ドリフト）では止まる。** quiz.csv を後から手直しすると
+原本が古いまま残り、原本から再シャッフルすると手直しが消える（実績: ある講座で
+発生）。ずれがあるときは上書きせずに FAIL し、どちらを正とするかを明示させる:
+
+  --adopt  quiz.csv を正とする（原本を quiz.csv から作り直してからシャッフル）
+  --force  原本を正とする（quiz.csv の手直しを捨てて原本からシャッフル）
+  --check-drift  何も書かずにずれの有無だけを報告する（ずれがあれば exit 1）
+
+内容の比較は選択肢の並び順に依存しない指紋で行う。**正解の集合も指紋に含める**
+（`Correct Answers` だけを直した場合も手直しとして検出する）。
 """
 from __future__ import annotations
 
@@ -154,58 +165,104 @@ def balance_warnings(rows: list[list[str]]) -> list[str]:
     return warnings
 
 
+class RawDriftError(Exception):
+    """quiz.csv に原本由来でない変更がある（上書きすると失われる）。"""
+
+    def __init__(self, path: Path, raw: Path, rows: list[str]):
+        self.path, self.raw, self.rows = path, raw, rows
+        super().__init__(f"{path} に {raw.name} 由来でない変更があります")
+
+
 def row_fingerprint(row: list[str]) -> tuple:
     """選択肢の並び順に依存しない行の指紋。
 
     シャッフルは行内の選択肢を並べ替えるだけなので、原本とその出力は
     この指紋が一致する。一致しなければ quiz.csv は原本に由来していない。
+
+    **どの選択肢が正解かも指紋に含める。** 含めないと `Correct Answers` だけを
+    直した手直し（正答の取り違えの修正そのもの）が「原本と同じ」と判定され、
+    原本からの再シャッフルで誤った正答に戻る。
     """
-    pairs = tuple(sorted((row[opt], row[exp]) for opt, exp in OPTION_PAIRS))
+    if len(row) != 17:
+        return tuple(row)
+    correct = {c for c in correct_indices(row[14])}
+    pairs = tuple(sorted(
+        (row[opt], row[exp], str(k) in correct)
+        for k, (opt, exp) in enumerate(OPTION_PAIRS, 1)
+        if row[opt].strip() or row[exp].strip()
+    ))
     return (row[0], row[1], row[15], row[16], pairs)
+
+
+def drift_rows(cur: list[list[str]], base: list[list[str]]) -> list[str]:
+    """シャッフルでは説明できない差分を行ごとに列挙する（空ならずれなし）。
+
+    行番号はヘッダーを1行目とする（他の検査と同じ数え方）。
+    """
+    out: list[str] = []
+    if len(cur) != len(base):
+        out.append(f"行数が違います（quiz.csv {len(cur) - 1} 問 / 原本 {len(base) - 1} 問）")
+    for i, (a, b) in enumerate(zip(cur[1:], base[1:]), 2):
+        if row_fingerprint(a) == row_fingerprint(b):
+            continue
+        if a[:1] != b[:1]:
+            what = "問題文"
+        elif len(a) == 17 and len(b) == 17 and a[15] != b[15]:
+            what = "Overall Explanation"
+        else:
+            what = "選択肢・解説・正解"
+        out.append(f"Row {i}: {what}が原本と違います（{(a[0] if a else '')[:40]}...）")
+    return out
 
 
 def raw_is_stale(path, raw) -> bool:
     """quiz.csv が quiz.raw.csv に由来していないなら True。"""
-    cur = read_rows(path)
-    base = read_rows(raw)
-    if len(cur) != len(base):
-        return True
-    for a, b in zip(cur[1:], base[1:]):
-        if len(a) != 17 or len(b) != 17:
-            if a != b:
-                return True
-            continue
-        if row_fingerprint(a) != row_fingerprint(b):
-            return True
-    return False
+    return bool(drift_rows(read_rows(path), read_rows(raw)))
 
 
-def ensure_raw(path, raw_path=None) -> Path:
-    """原本を退避する。整合しない原本は作り直す。
+def ensure_raw(path, raw_path=None, adopt: bool = False, force: bool = False) -> Path:
+    """原本を退避する。原本とずれていれば止める（明示されたときだけ解消する）。
 
-    既存の原本が現在の quiz.csv と**整合しない**（= quiz.csv が原本に由来しない）
-    場合は原本を作り直す。作り直さないと、`_parts` を修正して結合し直した内容が
-    古い原本からのシャッフルに静かに上書きされる。
+    - 原本が無い: quiz.csv をそのまま原本にする
+    - 原本とずれていない（quiz.csv は原本のシャッフル）: 原本を温存する
+    - ずれている:
+        adopt=True なら quiz.csv から原本を作り直す（`_parts` を結合し直した直後、
+        または quiz.csv の手直しを正とするとき）
+        force=True なら原本を温存する（quiz.csv の手直しを捨てる）
+        どちらでもなければ `RawDriftError`
 
-    実績: `_parts` の4問を差し替えて `finalize_section.py` を再実行したが、
-    原本を温存したため merge の出力が古い原本から上書きされ、**3回の実行を
-    またいで差し替えが反映されなかった。その間すべての検証は OK を返した。**
+    旧版はずれを見つけると黙って原本を作り直していた。これは結合し直しには正しいが、
+    **原本を手で直した場合はその修正を quiz.csv で上書きして消していた**。
+    どちらを直したかは内容からは判定できないので、呼び出し側に選ばせる。
 
-    なお quiz.csv を手で編集した場合も原本は作り直される。原本の唯一の用途は
-    再ロールであり、quiz.csv を再現できない原本は定義上すでに無効なため。
+    実績（作り直しが必要な理由）: `_parts` の4問を差し替えて `finalize_section.py` を
+    再実行したが、原本を温存したため merge の出力が古い原本から上書きされ、**3回の
+    実行をまたいで差し替えが反映されなかった。その間すべての検証は OK を返した。**
+    `finalize_section.py` は結合の直後なので `adopt` で呼ぶ（手直しの消失は結合前の
+    `merge_parts.py` の検査が防ぐ）。
     """
     path = Path(path)
     raw = Path(raw_path) if raw_path else path.with_name("quiz.raw.csv")
     if not raw.exists():
         shutil.copyfile(path, raw)
         return raw
-    if raw_is_stale(path, raw):
+    drift = drift_rows(read_rows(path), read_rows(raw))
+    if not drift:
+        return raw
+    if adopt:
         shutil.copyfile(path, raw)
         print(
-            f"NOTE: {raw.name} が現在の {path.name} と整合しないため作り直しました"
-            f"（{path.name} が結合し直されたか手で編集されています）"
+            f"NOTE: {raw.name} を現在の {path.name} から作り直しました"
+            f"（--adopt。ずれ {len(drift)} 件を {path.name} 側で採用）"
         )
-    return raw
+        return raw
+    if force:
+        print(
+            f"NOTE: --force。{path.name} の原本由来でない変更 {len(drift)} 件を捨てて"
+            f" {raw.name} からシャッフルします"
+        )
+        return raw
+    raise RawDriftError(path, raw, drift)
 
 
 def _shuffled(base: list[list[str]], seed: int) -> list[list[str]]:
@@ -232,11 +289,15 @@ def choose_seed(
 
 
 def shuffle_file(
-    path, seed: int | None = None, raw_path=None, max_seed: int = DEFAULT_SEED_RANGE
+    path, seed: int | None = None, raw_path=None, max_seed: int = DEFAULT_SEED_RANGE,
+    adopt: bool = False, force: bool = False,
 ) -> dict:
-    """原本から読み、最良シード（または指定シード）でシャッフルして書き出す。"""
+    """原本から読み、最良シード（または指定シード）でシャッフルして書き出す。
+
+    原本とずれていれば `RawDriftError`（adopt / force で解消。`ensure_raw` 参照）。
+    """
     path = Path(path)
-    raw = ensure_raw(path, raw_path)
+    raw = ensure_raw(path, raw_path, adopt=adopt, force=force)
     rows = read_rows(raw)
     header, base = rows[0], rows[1:]
 
@@ -272,9 +333,54 @@ def main(argv: list[str]) -> int:
     )
     ap.add_argument("--max-seed", type=int, default=DEFAULT_SEED_RANGE)
     ap.add_argument("--raw", default=None, help="原本のパス（既定: 同ディレクトリの quiz.raw.csv）")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument(
+        "--adopt", action="store_true",
+        help="原本とずれていたら quiz.csv を正として原本を作り直す（結合し直した直後・quiz.csv を手直ししたとき）",
+    )
+    g.add_argument(
+        "--force", action="store_true",
+        help="原本とずれていても原本を正としてシャッフルする（quiz.csv の手直しは失われる）",
+    )
+    g.add_argument(
+        "--check-drift", action="store_true",
+        help="何も書かずに原本とのずれだけを報告する（ずれがあれば exit 1）",
+    )
     a = ap.parse_args(argv[1:])
 
-    r = shuffle_file(a.csv_path, seed=a.seed, raw_path=a.raw, max_seed=a.max_seed)
+    if a.check_drift:
+        path = Path(a.csv_path)
+        raw = Path(a.raw) if a.raw else path.with_name("quiz.raw.csv")
+        if not raw.exists():
+            print(f"OK   {path}: 原本 {raw.name} がまだ無い（シャッフル前）")
+            return 0
+        drift = drift_rows(read_rows(path), read_rows(raw))
+        if not drift:
+            print(f"OK   {path}: {raw.name} のシャッフル以外の差分はありません")
+            return 0
+        print(f"WARN {path}: {raw.name} 由来でない変更が {len(drift)} 件あります（raw ドリフト）")
+        for d in drift[:20]:
+            print(f"  - {d}")
+        print("  原本から再シャッフルすると、これらの変更は失われます。")
+        return 1
+
+    try:
+        r = shuffle_file(
+            a.csv_path, seed=a.seed, raw_path=a.raw, max_seed=a.max_seed,
+            adopt=a.adopt, force=a.force,
+        )
+    except RawDriftError as e:
+        print(
+            f"FAIL {e.path}: {e.raw.name} 由来でない変更が {len(e.rows)} 件あります。"
+            "上書きせずに停止しました（raw ドリフト）"
+        )
+        for d in e.rows[:20]:
+            print(f"  - {d}")
+        if len(e.rows) > 20:
+            print(f"  ... 他 {len(e.rows) - 20} 件")
+        print(f"  {e.path.name} の手直しを残す      → --adopt（原本を {e.path.name} から作り直す）")
+        print(f"  {e.raw.name} を正とする（手直しを捨てる） → --force")
+        return 1
     print(
         f"shuffled {r['n']} questions / seed={r['seed']} / "
         f"worst relative deviation={r['worst_relative_deviation']:.1%} / raw={r['raw']}"

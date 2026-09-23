@@ -50,6 +50,10 @@ def write_rows(path, rows: list[list[str]]) -> None:
 # HTML タグに見える文字列の検出用。`<word>` `<word/>` `</word>` だけに当てる
 # （`a < b` や `=>` のような比較・矢印は拾わない）。
 HTML_TAG_RE = re.compile(r"<[A-Za-z_][A-Za-z0-9_-]*\s*/?>|</[A-Za-z_][A-Za-z0-9_-]*>")
+# `<a href="https://...">...</a>` は Udemy がリンクとして保存する（実測。linkify_csv.py が作る形）。
+# タグ検査の対象から外す。
+ANCHOR_RE = re.compile(r'<a\s+href="https?://[^"<>]+"[^<>]*>[^<>]*</a>', re.I)
+ANCHOR_TEXT_RE = re.compile(r'<a\s+href="https?://[^"<>]+"[^<>]*>([^<>]*)</a>', re.I)
 
 
 # Udemy のエディタと受講画面は Markdown を解釈しない。`**強調**` は `**` が記号の
@@ -123,7 +127,7 @@ def validate_csv(path) -> list[str]:
             # 解けない文になった（Explanation 側も同様に消えた）。
             # XML タグに言及したいときは括弧を外して
             # `role, context, and output XML tags` と書く。
-            tags = sorted(set(HTML_TAG_RE.findall(cell)))
+            tags = sorted(set(HTML_TAG_RE.findall(ANCHOR_RE.sub("", cell))))
             if tags:
                 errors.append(
                     f"Row {i} col {ci} ({HEADER[ci - 1]}): contains tag-like "
@@ -193,13 +197,13 @@ def layout_warnings(path) -> list[str]:
         if len(row) != 17:
             continue
         for opt, exp in OPTION_PAIRS:
-            text = row[exp]
+            text = ANCHOR_TEXT_RE.sub(r"\1", row[exp])   # リンクのマークアップは見た目の長さに入れない
             if row[opt].strip() and len(text) > OPTION_MAX_UNBROKEN and "\n" not in text:
                 warns.append(
                     f"Row {i}: {HEADER[exp]} is {len(text)} chars on one line "
                     "- put the verdict on line 1 and the reason on the next"
                 )
-        overall = row[15]
+        overall = ANCHOR_TEXT_RE.sub(r"\1", row[15])
         m = SOURCE_RE.search(overall)
         body = overall[: m.start()] if m else overall
         body = body.strip("\n")

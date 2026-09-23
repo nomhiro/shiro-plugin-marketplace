@@ -207,7 +207,11 @@ else:
 
 ```bash
 python "<CLAUDE_PLUGIN_ROOT>/scripts/validate_quiz_csv.py" <section-folder>/quiz.csv
+python "<CLAUDE_PLUGIN_ROOT>/scripts/check_style.py" <section-folder>/_parts/<ドメイン>.csv --sections sections.md
 ```
+
+`check_style.py` は正誤印 x `Correct Answers` の整合と `glossary` の禁止訳語を必ず検査する
+（front matter の `style` があれば訳・文体・出典 URL の空白も）。
 
 加えて抜き打ちで確認します。
 
@@ -336,6 +340,17 @@ section02-mock-exam-2/_parts/D1.csv に N 問書き込み完了（meta.tsv も�
 
 表記ルールはプロジェクト `CLAUDE.md`「用語表記ルール」に従います。原則として製品名・サービス名・API 名・フラグ名・パラメータ名は**原語のまま**書き、カタカナ音写しません。
 
+**`sections.md` front matter の `glossary` は機械検査される。** 各要素の `term` は原語のまま書き、
+`forbid` に挙がった表記（和訳・カタカナ音写・直訳調）は問題文・選択肢・解説のどこにも使わない
+（`allow_context` に挙がった言い回しだけは許される）。`check_style.py` が `Domain` 列以外の全カラムを
+部分一致で走査し、1件でも FAIL にする。実績: 方針に「原語のまま」と書いてあったのに、ある講座の
+300問で約400件の和訳・カタカナ化・直訳調が混入した。散文の方針だけでは守られない前提で、
+**書き始める前に `glossary` を読む**こと。
+
+**日本語と英数字の間の半角スペースの有無は、担当分の全問で揃える。** 分割して書くと回ごとに癖が
+割れる（実績: ある講座の1本で前半25問はスペース無し・後半25問はあり）。`merge_parts.py` が行ごとに
+判定して警告する。前半を書いた時点の癖を後半でも守る。
+
 技術用語は**初出時に括弧で意味を補足**します（同じ問題内で2回目以降は省略可。用語名そのものは原語のまま）。
 
 ### 出典 URL のルール
@@ -359,6 +374,7 @@ section02-mock-exam-2/_parts/D1.csv に N 問書き込み完了（meta.tsv も�
 
 - [ ] 不正解の選択肢に「その選択肢が何を意味するか」が書かれているか
 - [ ] 専門用語に初出時の補足があるか／技術用語がカタカナ音写になっていないか
+- [ ] `glossary` の `forbid` の表記を使っていないか（`check_style.py` の FAIL が 0 か）
 - [ ] `Overall Explanation` に具体例またはシナリオが含まれているか
 - [ ] 出典 URL が公式ドキュメントのディープリンクで記載されているか
 - [ ] 不正解の選択肢が「現実的な誤答」になっているか
