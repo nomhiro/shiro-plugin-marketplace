@@ -69,7 +69,11 @@ def norm(t: str) -> str:
 
 def recognize(wav: Path, endpoint: str, cred) -> str:
     import azure.cognitiveservices.speech as sd
-    tmp = Path(tempfile.gettempdir()) / f"verify_tts_{wav.stem}_16k.wav"
+    # 一時ファイルは一意の名前にする（区間名だけだと、並行実行した別レクチャーの同名区間と上書きし合い、
+    # 他の回の音声を認識して「台本と別の文」と誤判定する。実測で起きた）
+    fd, tmpname = tempfile.mkstemp(prefix=f"verify_tts_{wav.stem}_", suffix=".wav")
+    os.close(fd)
+    tmp = Path(tmpname)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-ar", "16000", "-ac", "1", str(tmp)],
                    check=True)
     cfg = sd.SpeechConfig(token_credential=cred, endpoint=endpoint)
