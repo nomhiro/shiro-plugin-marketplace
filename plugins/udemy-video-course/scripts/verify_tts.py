@@ -6,11 +6,14 @@
 長さが台本の文字数に近いと qa_check.py の「実尺/期待尺」では見逃す。
 文字に戻して台本と突き合わせるしか確かめる方法がない。
 
-判定（どれかに当たれば NG）:
-  - 類似度（difflib、空白・句読点を除いて比較）が --threshold 未満
-  - 認識結果の長さが台本の 0.6〜1.6 倍の外（冒頭・末尾に余計な文が付いた、途中が抜けた）
-  - 台本の先頭 8 文字が、認識結果の先頭 30 文字の中に似た形で現れない（冒頭の抜け・前置き）
-    ※ 台本の先頭に英字・数字があるときは判定しない（Owner→オーナー のように表記が変わるため）
+判定（どれかに当たれば NG）。比べるのは漢字とひらがなだけ（英字・数字はカタカナや漢数字で
+認識されて一致しないため。difflib の全文比較では、正しい区間でも 0.5 前後まで下がり、事故と
+見分けがつかなかった）:
+  - 再現率（台本の2文字組のうち認識結果にある割合）が --threshold 未満 … 読み落とし・途中で切れた
+  - 適合率（認識結果の2文字組のうち台本にある割合）が --threshold 未満 … 前置き・別の文
+  - 台本の冒頭／末尾の数文字が、認識結果の冒頭／末尾に無い … 1文だけの脱落・付加
+  - スタイル指示の読み上げ（「オンライン講座」「語りかける」「カメラの前」など）
+0.6〜0.75 の区間は OK でも「要確認」と表示するので、認識結果を目で見て判断する。
 
 使い方:
     python verify_tts.py <..._transcript_rec.md> --endpoint https://<resource>.cognitiveservices.azure.com/
@@ -27,7 +30,6 @@ NG が出た区間は、wav を退避して再合成し、もう一度このス�
 from __future__ import annotations
 
 import argparse
-import difflib
 import json
 import os
 import re
@@ -35,6 +37,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 SLIDE_RE = re.compile(r"^スライド\s*(\d+)\s*[:：]")
@@ -95,24 +98,57 @@ def recognize(wav: Path, endpoint: str, cred) -> str:
     return "".join(out)
 
 
+J_RE = re.compile(r"[ぁ-ゟ一-鿿]")
+# 合成時のスタイル指示（「親しみやすいオンライン講座…語りかけるように…カメラの前に…」）が
+# そのまま読み上げられた事故の目印。台本側に無い語が認識結果に出たら NG
+LEAK_WORDS = ("語りかける", "カメラの前", "オンライン講座", "ナレーター", "安心して学べる")
+
+
+def _jchars(t: str) -> str:
+    """漢字とひらがなだけを残す（英字はカタカナで認識されるので比較から外す）"""
+    return "".join(J_RE.findall(t))
+
+
+def _bigrams(t: str) -> Counter:
+    return Counter(t[i:i + 2] for i in range(len(t) - 1))
+
+
+def _cover(part: str, whole: str) -> float:
+    """part の2文字組のうち、whole に現れる割合"""
+    a, b = _bigrams(part), _bigrams(whole)
+    n = sum(a.values())
+    return sum((a & b).values()) / n if n else 1.0
+
+
 def judge(script: str, got: str, threshold: float) -> tuple[bool, float, list[str]]:
-    a, b = norm(script), norm(got)
-    ratio = difflib.SequenceMatcher(None, a, b).ratio() if a else 0.0
+    """判定。戻り値の数値は min(再現率, 適合率)（漢字・ひらがなの2文字組で数える）。
+
+    - 再現率が低い：台本の一部が読まれていない（冒頭・途中の脱落、途中で切れた）
+    - 適合率が低い：台本に無い文が読まれている（前置きの付加、別の文、スタイル指示の読み上げ）
+    - 冒頭・末尾：台本の最初と最後の数文字が、認識結果の最初と最後にあるか
+    """
+    a, b = _jchars(script), _jchars(got)
     why = []
-    if ratio < threshold:
-        why.append(f"類似度 {ratio:.2f}")
-    if a:
-        lr = len(b) / len(a)
-        if not (0.6 <= lr <= 1.6):
-            why.append(f"長さの比 {lr:.2f}")
-        # 冒頭の確認は、台本の先頭が英字・数字を含まない場合だけ（英字はカタカナで認識されて一致しない）
-        head = a[:8]
-        if head and len(b) >= 8 and not re.search(r"[a-z0-9]", head):
-            best = max(difflib.SequenceMatcher(None, head, b[i:i + 8]).ratio()
-                       for i in range(0, max(1, min(30, len(b) - 7))))
-            if best < 0.4:
-                why.append("冒頭が台本と合わない")
-    return (not why), ratio, why
+    if not b:
+        return False, 0.0, ["認識結果が空"]
+    ab, bb = _bigrams(a), _bigrams(b)
+    inter = sum((ab & bb).values())
+    rec = inter / sum(ab.values()) if ab else 1.0
+    pre = inter / sum(bb.values()) if bb else 1.0
+    score = min(rec, pre)
+    if rec < threshold:
+        why.append(f"台本の読み落とし（再現率 {rec:.2f}）")
+    if pre < threshold:
+        why.append(f"台本に無い文（適合率 {pre:.2f}）")
+    if len(a) >= 12:
+        if _cover(a[:8], b[:24]) < 0.4:
+            why.append("冒頭が台本と合わない")
+        if _cover(a[-8:], b[-24:]) < 0.4:
+            why.append("末尾が台本と合わない")
+    leak = [w for w in LEAK_WORDS if w in got and w not in script]
+    if leak:
+        why.append("スタイル指示の読み上げ（" + "・".join(leak) + "）")
+    return (not why), score, why
 
 
 def main() -> int:
@@ -121,7 +157,8 @@ def main() -> int:
     ap.add_argument("--audio-dir", type=Path, default=None)
     ap.add_argument("--endpoint", default=os.environ.get("SPEECH_ENDPOINT"))
     ap.add_argument("--keys", nargs="*", default=None, help="rec_01 slide_02 … を指定（省略時は全区間）")
-    ap.add_argument("--threshold", type=float, default=0.5)
+    ap.add_argument("--threshold", type=float, default=0.6,
+                    help="再現率・適合率（漢字・ひらがなの2文字組）の下限。0.6〜0.75 は目視で確かめる帯")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args()
     if not a.endpoint:
@@ -143,10 +180,12 @@ def main() -> int:
         got = recognize(wav, a.endpoint, cred)
         ok, ratio, why = judge(secs[k], got, a.threshold)
         bad += not ok
-        results.append({"key": k, "ok": ok, "similarity": round(ratio, 3), "why": why, "recognized": got})
+        results.append({"key": k, "ok": ok, "score": round(ratio, 3), "why": why, "recognized": got})
         mark = "OK" if ok else "NG"
-        print(f"  {mark} {k} sim={ratio:.2f} {'／'.join(why)}")
-        if not ok:
+        if ok and ratio < 0.75:
+            mark = "OK?"
+        print(f"  {mark} {k} score={ratio:.2f} {'／'.join(why)}")
+        if mark != "OK":
             print(f"     台本: {secs[k][:80]}")
             print(f"     認識: {got[:80]}")
     if a.json:
