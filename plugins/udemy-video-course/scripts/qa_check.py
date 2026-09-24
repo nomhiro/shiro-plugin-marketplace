@@ -13,7 +13,7 @@
    逆に 5% を切ると喋りっぱなしで視聴者の目が追いつかない。
 3. **体言止め**    名詞で終わる文は TTS でぶつ切りに聞こえる。述語で言い切らせる。
 4. **管理番号**    レクチャー番号や試験コードをナレーションに出さない（受講者には
-   意味のない内部識別子）。
+   意味のない内部識別子）。あわせて単独の `az`（TTS が「アズ」と読む）も拾う。
 
 使い方:
     python qa_check.py <...>_transcript_rec.md
@@ -71,6 +71,7 @@ def is_taigendome(core: str) -> bool:
     return s[-1] not in PREDICATE_LAST
 
 
+AZ_RE = re.compile(r"(?<![A-Za-z0-9_.\-])[Aa]z(?![A-Za-z0-9_])")
 DEFAULT_ID_PATTERN = r"[A-Z]\d+-\d+(?:-\d+)?|[A-Z]\d+\.[a-z]-\d+"
 
 
@@ -189,6 +190,9 @@ def check_style(segs, id_pattern: str):
                 findings.append((seg["head"], "体言止め: …" + core[-28:] + "。"))
         for hit in set(id_re.findall(seg["text"])):
             findings.append((seg["head"], f"管理番号の読み上げ: {hit}"))
+        # 単独の az / Az は TTS が「アズ」と読む（references/tts-readings.md の A）
+        if AZ_RE.search(seg["text"]):
+            findings.append((seg["head"], "単独の az（「エーゼット」と書く）"))
     return findings
 
 
