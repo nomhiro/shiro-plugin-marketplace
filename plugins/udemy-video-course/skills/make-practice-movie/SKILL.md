@@ -57,6 +57,7 @@ python <SC>/build_rec.py frames.json --frame-dir frames --out-dir .. --base <B> 
                                                        # 見積もりパス：台本の骨組み _transcript_rec.md
 python <SC>/practice_movie.py build <ID> --audio-only  # 音声だけ先に合成
 python <SC>/qa_check.py ../<B>_transcript_rec.md       # 🔴 ここで TTS の異常を拾う（下記）
+python <SC>/verify_tts.py ../<B>_transcript_rec.md --endpoint <Speech のエンドポイント>   # 🔴 音声を文字に戻して台本と照合
 python <SC>/build_rec.py frames.json --frame-dir frames --out-dir .. --base <B> --slides slides.json        --audio-dir ../<B>_audio_rec --tail-sec 2.0      # 実尺で組み直す
 python <SC>/practice_movie.py analyze <ID> --force
 python <SC>/practice_movie.py build <ID> --video-only --force --slide-tail-seconds 1.0
@@ -68,6 +69,10 @@ python <SC>/qa_check.py ../<B>_transcript_rec.md ; python <SC>/leakcheck.py ../<
   **その wav の尺をそのままフレームの尺にする**ので、組んでからでは動画が間延びする。
   `qa_check.py` が「ループ疑い」「途中に長い無音」を出したら、**その wav を別の場所へ退避して
   `--audio-only` をもう一度**（無い wav だけ合成される）。退避は削除でなく移動にする（比較用）。
+- 🔴 **合成音声が台本と無関係な文を読むことがある。** 実測（1本の中で4区間）：区間まるごと別の文
+  （「教育的な講座は…」）、冒頭に余計な前置き（「ようこそ。オンライン講座へ…」）、冒頭の1文の脱落。
+  **長さが近いと `qa_check.py` の比では見逃す。** `verify_tts.py` で STT に戻して台本と照合する
+  （類似度・長さの比・冒頭の一致）。NG は退避して再合成し、もう一度照合する。
 - 強調枠は **`box_fit.py` を通すまで信用しない。** 目分量の枠は文字に接する・かぶる
   （実測：10本で56件）。2px まで細くしても空きが取れない区間は、撮り直し時に行間を広げる
   （`record-practice-screen` の B-1）。
