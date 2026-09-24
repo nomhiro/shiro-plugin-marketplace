@@ -164,8 +164,14 @@ def main() -> int:
     if not a.endpoint:
         print("--endpoint か SPEECH_ENDPOINT を指定してください", file=sys.stderr)
         return 2
-    base = a.transcript.name.replace("_transcript_rec.md", "")
-    adir = a.audio_dir or (a.transcript.parent / f"{base}_audio_rec")
+    # 実践（…_transcript_rec.md ＋ …_audio_rec/slide_NN.wav・rec_NN.wav）と
+    # 座学（…_transcript.md ＋ …_audio/speech_NN.wav）の両方に対応する
+    base = a.transcript.name.replace("_transcript_rec.md", "").replace("_transcript.md", "")
+    adir = a.audio_dir
+    if adir is None:
+        adir = a.transcript.parent / f"{base}_audio_rec"
+        if not adir.exists():
+            adir = a.transcript.parent / f"{base}_audio"
     secs = parse(a.transcript)
     keys = a.keys or list(secs)
     from azure.identity import DefaultAzureCredential
@@ -174,6 +180,8 @@ def main() -> int:
     print(f"■ verify-tts: {base}（{len(keys)} 区間）")
     for k in keys:
         wav = adir / f"{k}.wav"
+        if not wav.exists() and k.startswith("slide_"):
+            wav = adir / f"speech_{k[6:]}.wav"   # 座学の音声の名前
         if k not in secs or not wav.exists():
             print(f"  -- {k}: 台本か wav が無い")
             continue
