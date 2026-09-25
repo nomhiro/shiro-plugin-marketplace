@@ -44,6 +44,7 @@ def wav_dur(path: pathlib.Path) -> float:
 
 
 def mmss(t: float) -> str:
+    t = round(t, 2)  # 59.996 を「00:60.00」と書かないよう、先に丸めてから分と秒に分ける
     return f"{int(t) // 60:02d}:{t % 60:05.2f}"
 
 
@@ -141,6 +142,7 @@ def main() -> int:
 
     for sg in segs:
         s, e = sg["new_s"], sg["new_e"]
+        s, e = round(s, 2), round(e, 2)
         lines[sg["i"]] = (f"{sg['pre']}{int(s) // 60:02d}:{s % 60:05.2f}-"
                           f"{int(e) // 60:02d}:{e % 60:05.2f}{sg['suf']}")
     p.write_text("\n".join(lines), encoding="utf-8")

@@ -5,11 +5,15 @@
 
 1. **TTS の異常**  合成音声は、まれに同じ文を繰り返したり（ループ）、途中で切れたり
    する。原稿の文字数から期待尺を出し、実尺との比で外れ値を落とす。
+   さらに、**音声の途中に長い無音が挟まる**異常（尺の比では帯の中に収まることがある）を
+   silencedetect で拾う。
+   → 静止画から組む回（モードB）は、`--audio-only` の**直後、`build_rec.py --audio-dir` の前**に
+     走らせる。異常な wav の尺がそのままフレームの尺になるため、組んでからでは遅い。
 2. **沈黙率**      区間の尺に対してナレーションが短すぎると「間が持たない」動画になる。
    逆に 5% を切ると喋りっぱなしで視聴者の目が追いつかない。
 3. **体言止め**    名詞で終わる文は TTS でぶつ切りに聞こえる。述語で言い切らせる。
 4. **管理番号**    レクチャー番号や試験コードをナレーションに出さない（受講者には
-   意味のない内部識別子）。
+   意味のない内部識別子）。あわせて単独の `az`（TTS が「アズ」と読む）も拾う。
 
 使い方:
     python qa_check.py <...>_transcript_rec.md
@@ -34,6 +38,13 @@ DEFAULT_CPS = 5.7
 LOOP_RATIO, CUT_RATIO = 1.8, 0.62
 # 1秒あたりの文字数。この帯を外れると読み上げが異常に速い/遅い
 CPS_BAND = (3.0, 8.5)
+# 読み上げ速度の判定は、この文字数以上の区間だけ（英字の多い短文「Successfully installed と出れば完了です。」は
+# 文字数に対して速く読まれ、毎回帯の外に出る誤検知になっていた）
+SPEED_MIN_CHARS = 40
+# 音声の途中の無音。これより長い無音が頭と末尾以外にあれば異常を疑う（句読点の間は 1 秒未満。文末の間は 2 秒前後になることがあるので 2.5 秒）
+INNER_SILENCE_SEC, SILENCE_DB = 2.5, -40
+# 末尾の無音。合成の末尾に数秒の無音が付くと、フレームの尺が伸びて動画に長い無音ができる
+TAIL_SILENCE_SEC = 2.0
 
 SLIDE_RE = re.compile(r"^スライド\s*(\d+)\s*[:：]")
 REC_RE = re.compile(
@@ -60,6 +71,7 @@ def is_taigendome(core: str) -> bool:
     return s[-1] not in PREDICATE_LAST
 
 
+AZ_RE = re.compile(r"(?<![A-Za-z0-9_.\-])[Aa]z(?![A-Za-z0-9_])")
 DEFAULT_ID_PATTERN = r"[A-Z]\d+-\d+(?:-\d+)?|[A-Z]\d+\.[a-z]-\d+"
 
 
@@ -72,6 +84,31 @@ def ffprobe_duration(path: Path) -> float | None:
         return float(out)
     except Exception:
         return None
+
+
+def inner_silences(path: Path, total: float) -> list[tuple[float, float]]:
+    """途中の INNER_SILENCE_SEC 以上の無音と、末尾の TAIL_SILENCE_SEC 以上の無音 [(start, 長さ)]。"""
+    try:
+        err = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af",
+             f"silencedetect=noise={SILENCE_DB}dB:d={INNER_SILENCE_SEC}", "-f", "null", "-"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace").stderr
+    except Exception:
+        return []
+    starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", err)]
+    durs = [float(x) for x in re.findall(r"silence_duration: ([\d.]+)", err)]
+    out = []
+    for st, du in zip(starts, durs):
+        if st > 0.3 and st + du < total - 0.3:
+            out.append((st, du))
+    # 末尾の無音（最後の silence_start が末尾まで続き、閉じていない場合を含む）
+    if len(starts) > len(durs):
+        tail = total - starts[-1]
+        if starts[-1] > 0.3 and tail >= TAIL_SILENCE_SEC:
+            out.append((starts[-1], tail))
+    elif starts and durs and starts[-1] + durs[-1] >= total - 0.3 and durs[-1] >= TAIL_SILENCE_SEC:
+        out.append((starts[-1], durs[-1]))
+    return out
 
 
 def parse_transcript(path: Path):
@@ -131,8 +168,11 @@ def check_tts(segs, audio_dir: Path, cps: float):
             findings.append((seg["head"], f"ループ疑い（実尺/期待尺={ratio:.2f}）"))
         elif ratio < CUT_RATIO:
             findings.append((seg["head"], f"途切れ疑い（実尺/期待尺={ratio:.2f}）"))
-        elif not (CPS_BAND[0] <= chars_per_sec <= CPS_BAND[1]):
+        elif len(seg["text"]) >= SPEED_MIN_CHARS and not (CPS_BAND[0] <= chars_per_sec <= CPS_BAND[1]):
             findings.append((seg["head"], f"読み上げ速度が帯の外（{chars_per_sec:.1f}字/秒）"))
+        for st, du in inner_silences(wav, d):
+            findings.append((seg["head"],
+                             f"長い無音（{st:.1f}s から {du:.1f}s）。wav を退避して再合成する"))
         if seg["kind"] == "rec":
             rec_span += seg["span"]
             rec_narr += d
@@ -150,6 +190,9 @@ def check_style(segs, id_pattern: str):
                 findings.append((seg["head"], "体言止め: …" + core[-28:] + "。"))
         for hit in set(id_re.findall(seg["text"])):
             findings.append((seg["head"], f"管理番号の読み上げ: {hit}"))
+        # 単独の az / Az は TTS が「アズ」と読む（references/tts-readings.md の A）
+        if AZ_RE.search(seg["text"]):
+            findings.append((seg["head"], "単独の az（「エーゼット」と書く）"))
     return findings
 
 

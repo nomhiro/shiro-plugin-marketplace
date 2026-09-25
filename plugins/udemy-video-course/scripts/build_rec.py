@@ -180,6 +180,7 @@ def build_video(entries, frame_dir: Path, out: Path, canvas: tuple[int, int],
 
 
 def mmss(t: float) -> str:
+    t = round(t, 2)  # 59.996 を「00:60.00」と書かないよう、先に丸めてから分と秒に分ける
     return f"{int(t) // 60:02d}:{t % 60:05.2f}"
 
 
