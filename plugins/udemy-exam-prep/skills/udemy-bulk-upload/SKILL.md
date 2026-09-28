@@ -109,6 +109,35 @@ Playwright（別プロファイルなので毎回ログインが要る）:
 **6本を先にまとめて作り、あとで1本ずつ設定と投入をするのが速い。**
 作成のたびに返る `編集` リンクの `quizId` を記録しておく。
 
+**テストの作成は API では 403 になる**ので画面で行うが、Claude in Chrome では
+`javascript_tool` のヘルパーで1本ずつ作れる。**毎回「最後の」カリキュラム項目を追加ボタンを押す**と、
+作った順に並ぶ（実績: 6本とも意図した順に並んだ）。タイトルは React の入力欄なので、
+ネイティブの setter で値を入れて `input` イベントを出す。日本語のタイトルは `\uXXXX` で渡す。
+
+```javascript
+window.__addTest = async (title) => {
+  let inp = document.querySelector('input[placeholder="タイトルを入力してください"]');
+  if (!inp) {
+    const adds = [...document.querySelectorAll('button')]
+      .filter(b => b.innerText.trim() === 'カリキュラム項目を追加');
+    adds[adds.length - 1].click();
+    await new Promise(r => setTimeout(r, 800));
+    const opt = [...document.querySelectorAll('button')]
+      .filter(b => b.innerText.includes('認定資格準備の時間制限付き試験'));
+    opt[opt.length - 1].click();
+    await new Promise(r => setTimeout(r, 1000));
+    inp = document.querySelector('input[placeholder="タイトルを入力してください"]');
+  }
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(inp, title);
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  [...document.querySelectorAll('button')].find(b => b.innerText.trim() === '演習テストを追加').click();
+};
+```
+
+作ったら `/api-2.0/courses/<courseId>/instructor-curriculum-items/?fields[quiz]=title,id` で
+順序と quizId を読む（[[upload-practice-tests]]）。設定値（時間・合格点・ランダム化）も
+`/api-2.0/courses/<courseId>/quizzes/<quizId>/` の PATCH で入れられる（`duration` は秒）。
+
 ### 「編集」と「削除」は隣接している
 
 テスト行には `img "編集"` を持つ **link** と `img "削除"` を持つ **button** が並ぶ。
@@ -185,6 +214,10 @@ Claude in Chrome:
 3. file_upload にその ref と <abs>/quiz.csv を渡す
 4. find / screenshot で「問題が作成されます。」を確かめてから「閉じる」を押す
 ```
+
+> **Claude in Chrome ではダイアログ内に CSV 用の非表示の入力欄が2つ見えることがある。**
+> 実績: 1つ目に渡すと `Element is no longer in the document` になり、**2つ目が効いた**（6本とも）。
+> 片方で失敗したら、もう片方の ref に渡す。50問前後で投入は10〜20秒かかる。
 
 Playwright:
 

@@ -132,7 +132,16 @@ front matter の `question_types` の比率に従います。
 |-------|--------|----------------|----------------|----------|------|--------|
 | 1 | D1 | 1.4 | prerequisite gate による決定的強制 | S1 | 最善の第一手 | multiple-choice |
 
-プランの時点で、ドメイン別ノルマ・タスクステートメント割当・形式比率・シナリオ分散をすべて満たしているか数えます。`question-bank.md` に同一 `(task_statement, tested_concept)` があれば別の概念に振り替えます。
+プランの時点で、ドメイン別ノルマ・タスクステートメント割当・形式比率・シナリオ分散・**シナリオ率（定義型の数）**をすべて満たしているか数えます。
+
+**論点はまず作問ブリーフの「中核論点」（出題傾向の校正結果）から選ぶ。** 既出の論点でも、
+同じ `(task_statement, tested_concept)` が `max_per_concept` 未満なら再出題してよい。
+変えるのは問い方と正解にする側面で、**場面（業種・固有名詞）の入れ替えだけでは変えたことにならない**
+（問題文 82% / 正解肢 80% の類似で FAIL になる）。上限に達した概念だけを別の中核論点に振り替える。
+
+**「まだ出ていない概念」を探しに周辺の細部へ行かない。** 上限値・課金・ロール名・タイムアウト・
+画面の細かな違い・SDK の内部構造は、本番の練習評価に出ないかぎり論点にしない。迷ったら易しい側に倒す。
+オーケストレータから1問ずつの仕様表（論点と正解の要旨）が渡されたら、それに従って書く。
 
 ### Step 3: 個別問題の起草
 
@@ -206,9 +215,22 @@ else:
 書き終えた後、機械的に検証します。
 
 ```bash
-python "<CLAUDE_PLUGIN_ROOT>/scripts/validate_quiz_csv.py" <section-folder>/quiz.csv
+python "<CLAUDE_PLUGIN_ROOT>/scripts/validate_quiz_csv.py" <section-folder>/_parts/<ドメイン>.csv
 python "<CLAUDE_PLUGIN_ROOT>/scripts/check_style.py" <section-folder>/_parts/<ドメイン>.csv --sections sections.md
+python "<CLAUDE_PLUGIN_ROOT>/scripts/check_option_balance.py" <section-folder>/_parts/<ドメイン>.csv
+python "<CLAUDE_PLUGIN_ROOT>/scripts/check_granularity.py" <section-folder>/_parts/<ドメイン>.csv --sections sections.md
 ```
+
+他のドメインのパートがそろっていれば、**書き込まない形で**結合を確かめ、既に確定した本との類似を見る:
+
+```bash
+python "<CLAUDE_PLUGIN_ROOT>/scripts/merge_parts.py" <section-folder> --keep-parts --dry-run
+python "<CLAUDE_PLUGIN_ROOT>/scripts/audit_course.py"
+```
+
+**`merge_parts.py` に `--force` を付けない。** 精読済みの本を上書きする事故になる
+（`.reviewed` の本は拒否される）。担当の問題に関わる FAIL（問題文 82% / 正解肢 80% /
+創作識別子の衝突）と、正解肢の類似度 70% 以上の WARN を 0 にしてから報告する。
 
 `check_style.py` は正誤印 x `Correct Answers` の整合と `glossary` の禁止訳語を必ず検査する
 （front matter の `style` があれば訳・文体・出典 URL の空白も）。
@@ -217,6 +239,8 @@ python "<CLAUDE_PLUGIN_ROOT>/scripts/check_style.py" <section-folder>/_parts/<�
 
 - [ ] `multi-select` の正解が2個以上か（1個なら `multiple-choice` に変更）
 - [ ] `multi-select` に誤答が1つ以上あるか（`正解数 < 選択肢数`）
+- [ ] `multi-select` で正解肢が全部最長になっていないか（誤答肢の少なくとも1つを最短の正解肢より長くする。既定で FAIL）
+- [ ] 定義型（非シナリオ型）の数が指定どおりか（meta の scenario 列で数える）
 - [ ] 形式比率がノルマ範囲に入っているか
 - [ ] 全行が17カラムか
 - [ ] `Overall Explanation` に出典 URL が含まれているか
@@ -255,6 +279,8 @@ section02-mock-exam-2/_parts/D1.csv に N 問書き込み完了（meta.tsv も�
 - **解説に Markdown 記法を使う**（`**強調**` は Udemy で記号のまま表示される）
 - **解説で選択肢を「選択肢2」のように番号で参照する**（シャッフルで指す先が変わって壊れる）
 - **digest で確認できない具体的な数値を書く**（上限・文字数・サイズ・解像度。推測で作らない）
+- **上限値・課金・API の版で答えが決まる問題を作る**（digest に出典があっても。本番の練習評価に出ない細部）
+- **既出を避けるために周辺の細部へ論点を移す / 場面だけ入れ替えて作り直す**
 - **旧構成・廃止済み・classic 系のドキュメントを根拠にする**（現行ドキュメントと分かれている製品は現行側を正とする）
 - **`<セクション>/quiz.csv` を作る・編集する** — 結合は `merge_parts.py` の責務。
   あなたは `_parts/` の2ファイルだけを書く（並列時の書き戻し競合を防ぐ）

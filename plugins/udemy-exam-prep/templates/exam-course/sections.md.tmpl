@@ -37,6 +37,16 @@ question_types:
   multiple-choice: "60-70%"
   multi-select: "30-40%"
 scenario_ratio_min: "30%"
+# シナリオ率の範囲（任意）。出題傾向の校正（create-section Step 2.7）で公式の練習評価を数えて決める。
+# 下限だけだと盛りすぎを止められない（実績: フル模試1本目が 88% のまま通った）。
+# 分野別演習（drill）は時間に余裕があるので上限をかけないのが普通。優先は 本ごと > 種類ごと > 全体。
+# scenario_ratio:
+#   mock: {min: "55%", max: "65%"}
+# 細部を問う問題の検出（check_granularity.py。既定 warn）。校正の「出さないもの」を patterns に足す
+# granularity:
+#   severity: warn
+#   patterns: []
+#   allow: []
 max_per_concept: 2
 # 非シナリオ型（scenario_ratio_min の分母から除く型）。既定は knowledge のみ
 non_scenario_codes: ["knowledge"]

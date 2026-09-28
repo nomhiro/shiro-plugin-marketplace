@@ -144,6 +144,19 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/check_invariants.py" <folder>/quiz.csv --s
 
 - 用語の行は、レポートの A と C から**実際に見つかった訳し方を全部**列挙する（修正エージェントが同じ語を探せるように）
 - 迷った用語は、この時点で要確認として解決してからシートに載せる（修正エージェントごとに判断させない）
+- **「直す表記 → 正しい表記」の向きが一目で分かる形にする。** 散文や「統一する表記 | 直す表記」の
+  2列の表は読み違えられる（実績: 修正エージェント6本のうち3本が表の左右を逆に読み、
+  正しい表記を誤った方へ直した）。各行を次の形で書き、同じ内容を `glossary` の YAML にもしておく:
+
+  ```yaml
+  # 直す表記（forbid） → 正しい表記（term）
+  - term: "ピクセル"
+    forbid: ["画素"]
+    allow_context: ["動画素材"]        # 部分一致で拾ってしまう正当な語
+  ```
+
+  修正後、この YAML を front matter の `glossary` に入れて `check_style.py` を通せば、
+  **直し漏れと逆向きの修正が機械で残らず見つかる**（手順6の回帰防止もこれで兼ねる）
 
 ### 要確認の扱い
 
@@ -154,6 +167,10 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/check_invariants.py" <folder>/quiz.csv --s
 - 事実に関わる指摘（出典と正答の食い違い・別製品の出典）は、**出典で裏付けが取れた場合だけ**直す。
   問題そのものの妥当性が崩れている場合は直さずにユーザーへ報告し、差し替えは
   [[create-section]] の手順（question-author への再起草依頼）に戻す
+- **照合エージェントが「差し替え要」と判定したら、出題傾向の校正メモ（`research/calibration-*.md`）と
+  突き合わせる。** 公式の練習評価が同じ扱いをしていれば、問題の設計は正しく、直すのは解説の食い違いだけになる
+  （実績: 「翻訳を NLP の例とする問題は一次情報と矛盾する」と差し替え判定されたが、公式の練習評価が
+  まさに翻訳を NLP の例として正解にしていた。解説の矛盾だけを直して残した）
 
 ### 手順4: 修正（1セクションに1サブエージェント・並列）
 
@@ -206,7 +223,19 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_exam.py" --sections sections.md \
 # 4. 文体・正誤印・glossary の禁止訳語、出典
 python "${CLAUDE_PLUGIN_ROOT}/scripts/check_style.py" <folder>/quiz.csv --sections sections.md
 python "${CLAUDE_PLUGIN_ROOT}/scripts/check_sources.py" <folder>/quiz.csv --sections sections.md
+
+# 5. 長さバイアス（文面を直すと選択肢の長さが変わる）
+python "${CLAUDE_PLUGIN_ROOT}/scripts/check_option_balance.py" <folder>/quiz.csv
+
+# 6. 講座全体の類似（文面を揃えると、別の本の問題文と似てくることがある）
+python "${CLAUDE_PLUGIN_ROOT}/scripts/audit_course.py"
 ```
+
+**5 と 6 を飛ばさない。** 文面の修正は正解を動かさなくても、選択肢の長さと問題文の似方を変える。
+
+> 実績: ある講座の6本300問を精読で直したあと、長さの偏りの FAIL が13問（うち「正解肢が全部最長」4問）、
+> 問題文の類似 86% の FAIL が1組新しく出た（定型の問題文が揃って別の本と同じ文になった）。
+> いずれも不変条件・形式・文体の検査は通っていた。
 
 `check_invariants.py` が見るもの: 行数とヘッダー / `Question Type`・`Correct Answers`・`Domain` 列 /
 空でない選択肢の番号 / 各行の出典 URL の集合 / 各 `Explanation N` の冒頭の正誤印が
@@ -218,7 +247,33 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/check_sources.py" <folder>/quiz.csv --sect
 
 最後に、修正エージェントの主張も抜き取りで照合する。findings の `推奨修正` から数件選び、
 修正後の該当セルに入っているか（`--show`）と、統一表記シートの「直す前の表記」が
-全セクションから消えているか（`grep -c`）を見る。
+全セクションから消えているか（`grep -c`、または手順3の YAML を `glossary` に入れて `check_style.py`）を見る。
+**残っていたら文脈を見て判断する**（「動画素材」の「画素」のような部分一致は正当）。
+
+全体に一律で効く整形（日本語と英数字の間の半角スペース）は、修正がそろってから
+オーケストレータが全本に一括でかける:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/normalize_spacing.py" section0*/quiz.csv --check   # 数えるだけ
+python "${CLAUDE_PLUGIN_ROOT}/scripts/normalize_spacing.py" section0*/quiz.csv
+```
+
+### 手順5.5: 精読済みの印を置く（必須）
+
+精読の修正は `quiz.csv` にだけ入り、`_parts/` と `quiz.raw.csv` は精読前のまま残る。
+ここで `finalize_section.py` や `merge_parts.py --force` を実行すると**精読の修正がすべて消える。**
+検査がすべて通ったら、各セクションに印を置く:
+
+```bash
+for d in section0*/; do date +%F > "${d}.reviewed"; done
+```
+
+印のある本は、`merge_parts.py` / `finalize_section.py` が `--force` でも上書きを拒否する
+（明示的に捨てるときだけ `--discard-review-edits`）。以後の手直しは `quiz.csv` を直接編集し、
+混ぜ直すなら `shuffle_options.py --adopt` を使う。
+
+> 実績: 精読で400件以上直した本に対し、作問エージェントが自己検査のつもりで
+> `merge_parts.py --force` を実行する指示を受けていた。通っていれば精読の修正がすべて消えていた。
 
 ### 手順6: 回帰防止（機械スキャンはここで使う）
 
@@ -244,7 +299,9 @@ section{N} の精読レビューが完了しました。
 - 指摘: A x件 / B y件 / C z件（要確認 w件 → 出典で確認 u件・自然な日本語に v件）
 - 修正: n件（統一表記シート: .work/review/CONVENTIONS.md）
 - 直さずに報告する問題: （問題の妥当性に関わるもの。問題#と理由）
-- 検査: check_invariants OK / validate_quiz_csv OK / validate_exam OK / check_style OK
+- 検査: check_invariants OK / validate_quiz_csv OK / validate_exam OK / check_style OK /
+  check_option_balance OK / audit_course（FAIL 0）
+- 精読済みの印: section0*/.reviewed を配置
 - glossary に追加した禁止訳語: k件
 
 差分を確認のうえ、コミットするかを指示してください。
