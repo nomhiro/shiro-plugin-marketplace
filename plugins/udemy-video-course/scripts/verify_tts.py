@@ -77,8 +77,10 @@ def recognize(wav: Path, endpoint: str, cred) -> str:
     fd, tmpname = tempfile.mkstemp(prefix=f"verify_tts_{wav.stem}_", suffix=".wav")
     os.close(fd)
     tmp = Path(tmpname)
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-ar", "16000", "-ac", "1", str(tmp)],
-                   check=True)
+    # 末尾に無音を足す。合成音声の末尾の無音は 0.3 秒ほどしかなく、そのままだと STT が最後の語を
+    # 取りこぼして「〜を確認。」のように切れ、末尾切れと誤判定する（実測：10区間、足すと全部読めた）
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-af", "apad=pad_dur=1.5",
+                    "-ar", "16000", "-ac", "1", str(tmp)], check=True)
     cfg = sd.SpeechConfig(token_credential=cred, endpoint=endpoint)
     cfg.speech_recognition_language = "ja-JP"
     r = sd.SpeechRecognizer(speech_config=cfg, audio_config=sd.audio.AudioConfig(filename=str(tmp)))
@@ -129,12 +131,20 @@ _ANCHOR = 8
 
 
 def _find(anchor: str, b: str, rightmost: bool) -> int | None:
-    """anchor に最もよく合う b 内の開始位置。合う度合いが 0.5 未満なら None。同点なら端に近い方"""
+    """anchor が合う b 内の開始位置のうち、端（冒頭なら左端・末尾なら右端）に最も近いもの。
+    合う度合い 0.6 以上を優先し、無ければ最もよく合う位置（0.5 未満なら None）。
+    最もよく合う位置だけを採ると、同じ言い回しが区間の後ろにもあるとき（「1回目の応答で」と
+    「2回目の応答では」）そちらを選び、冒頭の前に余分な文があると誤判定する"""
     n = len(anchor)
+    ps = list(range(0, max(1, len(b) - n + 1)))
+    if rightmost:
+        ps.reverse()
     best, pos = 0.0, None
-    for p in range(0, max(1, len(b) - n + 1)):
+    for p in ps:
         c = _cover(anchor, b[p:p + n])
-        if c > best or (c == best and rightmost and c > 0):
+        if c >= 0.6:
+            return p
+        if c > best:
             best, pos = c, p
     return pos if best >= 0.5 else None
 
