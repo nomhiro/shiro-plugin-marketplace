@@ -120,6 +120,36 @@ def _cover(part: str, whole: str) -> float:
     return sum((a & b).values()) / n if n else 1.0
 
 
+# 台本の最初／最後の数文字が認識結果のどこに現れるかを探し、その前／後ろに残る文字数を数える。
+# 「末尾が合わない」（最後の8文字が認識結果の最後の24文字にあるか）だけでは、短い作り話が
+# 末尾に付いた事故を見逃す（実測：95秒の区間の末尾に「一番重要なテーマはSEO…」の約20字が付き、
+# 本来の末尾が24字の窓に残って OK になった。適合率も 0.88 までしか下がらない）
+EXTRA_MAX = 6   # 漢字・ひらがなでこれを超えて余っていたら NG（認識の揺れで数文字は余る）
+_ANCHOR = 8
+
+
+def _find(anchor: str, b: str, rightmost: bool) -> int | None:
+    """anchor に最もよく合う b 内の開始位置。合う度合いが 0.5 未満なら None。同点なら端に近い方"""
+    n = len(anchor)
+    best, pos = 0.0, None
+    for p in range(0, max(1, len(b) - n + 1)):
+        c = _cover(anchor, b[p:p + n])
+        if c > best or (c == best and rightmost and c > 0):
+            best, pos = c, p
+    return pos if best >= 0.5 else None
+
+
+def _extra_tail(a: str, b: str) -> int:
+    p = _find(a[-_ANCHOR:], b, rightmost=True)
+    # 見つからない場合は「末尾が台本と合わない」の判定に任せる
+    return 0 if p is None else max(0, len(b) - (p + _ANCHOR))
+
+
+def _extra_head(a: str, b: str) -> int:
+    p = _find(a[:_ANCHOR], b, rightmost=False)
+    return 0 if p is None else p
+
+
 def judge(script: str, got: str, threshold: float) -> tuple[bool, float, list[str]]:
     """判定。戻り値の数値は min(再現率, 適合率)（漢字・ひらがなの2文字組で数える）。
 
@@ -145,6 +175,11 @@ def judge(script: str, got: str, threshold: float) -> tuple[bool, float, list[st
             why.append("冒頭が台本と合わない")
         if _cover(a[-8:], b[-24:]) < 0.4:
             why.append("末尾が台本と合わない")
+        head, tail = _extra_head(a, b), _extra_tail(a, b)
+        if head > EXTRA_MAX:
+            why.append(f"冒頭の前に台本に無い文（{head} 字）")
+        if tail > EXTRA_MAX:
+            why.append(f"末尾の後に台本に無い文（{tail} 字）")
     leak = [w for w in LEAK_WORDS if w in got and w not in script]
     if leak:
         why.append("スタイル指示の読み上げ（" + "・".join(leak) + "）")
