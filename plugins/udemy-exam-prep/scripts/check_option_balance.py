@@ -34,6 +34,13 @@ LLM が問題を書くと、正解肢に根拠や仕組みの説明を書き込�
 multi-select は **最も短い正解肢が、最も長い誤答肢をどれだけ上回るか**で測る。
 これが正なら「長い順に N 個選ぶ」で全問正解でき、受講者は問題文を読まずに済む。
 
+**「正解肢が全部最長」は margin が小さくても既定で FAIL にする**（`--ms-all-longest`）。
+旧版は件数を「参考」として出すだけだったので、作問エージェントが毎回見落とした。
+
+> 実績: ある講座の模試4本で、作問のたびに「正解肢が全部最長」が1〜4問残った。
+> margin は +0〜+16% で上限 +20% に届かず、FAIL にならないまま R3 まで進んだ。
+> 長い順に選ぶだけで当たる形は margin の大小にかかわらず攻略可能なので、件数で止める。
+
 ## 短い選択肢だけの問題は散らばりを免除する
 
 用語名を裸で並べる問題（本番でよくある形）は散らばりが大きく出るが、
@@ -211,6 +218,26 @@ def multi_select_problems(
     return out
 
 
+def all_longest_problems(
+    result: dict, short_max: int = SHORT_OPTION_MAX_LEN
+) -> list[str]:
+    """multi-select で正解肢の集合が「最長の上位 N 個」と一致する問題を報告する。
+
+    margin の大小にかかわらず、長い順に選べば当たる。全選択肢が短い問題は免除する。
+    """
+    out: list[str] = []
+    for e in result.get("per_question", []):
+        if not e["all_correct_longest"] or e["max_len"] <= short_max:
+            continue
+        cor = [v for k, v in e["lengths"].items() if k in e["correct"]]
+        inc = [v for k, v in e["lengths"].items() if k not in e["correct"]]
+        out.append(
+            f"Q{e['q']}: multi-select の正解肢が全部最長（正解 {sorted(cor)} / 誤答 {sorted(inc)}）"
+            " - 誤答肢の少なくとも1つを、最短の正解肢より長くする"
+        )
+    return out
+
+
 def padding_tags(path) -> list[str]:
     """字数稼ぎのタグが付いた選択肢を報告する。
 
@@ -289,6 +316,8 @@ def main(argv: list[str]) -> int:
                     help="margin 超過問題の割合の上限（既定 0.15）")
     ap.add_argument("--short-max", type=int, default=SHORT_OPTION_MAX_LEN,
                     help="この字数以内の選択肢だけの問題は散らばりを免除する（既定 18）")
+    ap.add_argument("--ms-all-longest", choices=("fail", "warn", "off"), default="fail",
+                    help="multi-select で正解肢が全部最長の問題の扱い（既定 fail）")
     a = ap.parse_args(argv[1:])
 
     failed = False
@@ -301,6 +330,12 @@ def main(argv: list[str]) -> int:
             errs += problems(result, a.spread, a.margin, a.mean, a.share, a.short_max)
         errs += multi_select_problems(ms, a.margin, a.short_max)
         errs += padding_tags(target)
+        longest = all_longest_problems(ms, a.short_max) if a.ms_all_longest != "off" else []
+        # margin 超過として既に報告した問題は重ねて出さない
+        reported = {e.split(":")[0] for e in errs}
+        longest = [e for e in longest if e.split(":")[0] not in reported]
+        if a.ms_all_longest == "fail":
+            errs += longest
 
         if result["n"] == 0 and ms["n"] == 0:
             print(f"SKIP {target}: 判定対象の問題がない")
@@ -320,7 +355,7 @@ def main(argv: list[str]) -> int:
                 f"MS {ms['n']}問"
                 f" / margin 平均 {ms['mean_margin']:+.1%}"
                 f" 最大 {ms['max_margin']:+.0%}"
-                f" / 正解肢が全部最長 {ms['all_correct_longest']}問（参考）"
+                f" / 正解肢が全部最長 {ms['all_correct_longest']}問"
             )
         head = f"{target}: " + " | ".join(parts)
 
@@ -333,6 +368,9 @@ def main(argv: list[str]) -> int:
                 print(f"  ... 他 {len(errs) - 20} 件")
         else:
             print(f"OK   {head}")
+        if a.ms_all_longest == "warn":
+            for e in longest:
+                print(f"  WARN {e}")
 
     return 1 if failed else 0
 

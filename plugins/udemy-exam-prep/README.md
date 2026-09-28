@@ -27,6 +27,12 @@ Phase 0.5  /udemy-exam-prep:create-sections <CERT>
 Phase 1a   doc-researcher を技術領域ごとに並列起動（1回限り）
              → research/*.md に共有 digest（事実リスト＋出典URL）
              ↓
+Phase 1a.5 出題傾向の校正（1回限り・作問の前）
+             → 公式の練習評価・競合講座・受験記を調べ research/calibration-*.md に
+               1問ずつの構造メモ（型・粒度・選択肢に何が出るか）
+             → 作問ブリーフの「型の配分」「中核論点」「出さないもの」と
+               front matter の scenario_ratio / granularity を決める
+             ↓
 Phase 1b   /udemy-exam-prep:create-section N   （1 〜 mock_exams を順に）
              → question-author でサンプル生成
              ★ R2: 解説スタイル・難易度・distractor の質（初回のみ）★
@@ -37,6 +43,8 @@ Phase 1b   /udemy-exam-prep:create-section N   （1 〜 mock_exams を順に）
 Phase 1c   /udemy-exam-prep:review-section <N|all>   （任意・強く推奨）
              → 全問・全カラムを1問ずつ精読（製品名の和訳・翻訳調・表記ゆれ・出典と正答の食い違い）
              → 統一表記シートで一括修正 → check_invariants.py で不変条件を検査
+             → 長さバイアス・講座全体の監査をかけ直し、.reviewed の印を置く
+               （以後 merge_parts / finalize_section は --force でも上書きしない）
              ↓
 Phase 2    /udemy-exam-prep:create-udemy-course
              → Udemy にコース作成・基本設定・学習目的・メッセージ
@@ -149,6 +157,29 @@ source_scope:                               # ドメインごとの出典の許�
 - **`source_scope` は同じホストの別製品ページを出典にした問題を拾います。** 出典欠落・禁止ホスト・
   到達確認はすべて通ってしまう欠陥クラスです（実績: 精読レビューまで2件残った）
 
+### 任意キー: シナリオ率の範囲と粒度
+
+```yaml
+scenario_ratio_min: "30%"                   # 全体の下限（旧来のキー）
+scenario_ratio_max: "90%"                   # 全体の上限（任意）
+scenario_ratio:                             # 本の種類ごとの範囲（任意）。drill は高くてよい
+  mock: {min: "55%", max: "65%"}
+sections:
+  - slug: section03-mock-exam-1
+    scenario_ratio: {max: "70%"}            # 本ごとの範囲（任意・最優先）
+granularity:                                # 細部を問う問題の検出（check_granularity.py）
+  severity: warn                            # warn（既定）| fail
+  patterns: ["プレビュー API"]              # 追加の正規表現
+  allow: ["temperature は 0 から 2"]        # 学習ガイドに直結する数値など、拾わない言い回し
+```
+
+- **シナリオ率は上限も持たせる。** 下限だけでは盛りすぎを止められません（実績: フル模試1本目が
+  88% のまま通り、公式の練習評価の約 60% より読ませる模試になった）。範囲は 本ごと > 種類ごと > 全体
+  の順に優先し、`check_scenario_ratio.py`（finalize の 4.1）と `audit_course.py` が同じ関数で判定します
+- **粒度の検査は補助の網です。** 上限値・課金・API の版のように語で拾えるものだけを WARN にします。
+  SDK の内部構造や周辺機能のような細かさは語では拾えない（実績: 差し戻した20問のうち語で拾えたのは1問）
+  ので、主な防御は校正フェーズの「出さないもの」と、論点と正解を先に決めてから書かせる手順です
+
 ### `mode: mixed` — 本ごとに問題数と配分が違う構成
 
 本番が大問題数の試験では「分野別演習でドメインを絞って深く → フル模試で横断」の
@@ -189,6 +220,8 @@ sections:
 7. `glossary` があれば各要素が `term`（文字列）と `forbid`（空でない文字列のリスト）を持つこと
 8. `source_scope` があれば `severity` が warn / fail、各値がリスト、`domains` のキーが実在の
    ドメイン id であること（判定は `check_sources.py` と共通）
+9. `scenario_ratio_min` / `scenario_ratio_max` / `scenario_ratio.<kind>` / `sections[].scenario_ratio`
+   があれば、値が "60%" のような 0〜100% の割合であること
 
 ## 対応ベンダーと調査レシピ
 
@@ -221,14 +254,26 @@ python scripts/init_course.py --dest . --cert CCA-F \
 python scripts/validate_quiz_csv.py section0*/quiz.csv
 
 # 正解肢の長さバイアス検出（品質ゲート。シャッフル前に通す）
+# multi-select の「正解肢が全部最長」は既定で FAIL（--ms-all-longest warn|off で緩める）
 python scripts/check_option_balance.py section0*/quiz.csv
+
+# シナリオ率が front matter の範囲に入っているか（本ごと。範囲の指定が無ければ SKIP）
+python scripts/check_scenario_ratio.py section03-mock-exam-1 --sections sections.md
+
+# 細部（上限値・課金・API の版）が答えを決めている疑いのある問題（既定 WARN）
+python scripts/check_granularity.py section0*/quiz.csv --sections sections.md
+
+# 精読後の quiz.csv の日本語と英数字の間の半角スペースを揃える（--check で数えるだけ）
+python scripts/normalize_spacing.py section0*/quiz.csv
 
 # 出典 URL のロケール正規化（冪等）
 python scripts/normalize_urls.py section0*/quiz.csv
 
 # パートの結合（日本語と英数字の間の半角スペースの割れを警告。--normalize で多数派に揃える。
-# quiz.csv / quiz.raw.csv に _parts に無い手直しがあれば上書きせずに止まる。--force で上書き）
+# quiz.csv / quiz.raw.csv に _parts に無い手直しがあれば上書きせずに止まる。--force で上書き。
+# 精読済み（.reviewed）の本は --force でも止まる。作問の自己検査は --dry-run（何も書かない））
 python scripts/merge_parts.py section01-mock-exam-1 --keep-parts
+python scripts/merge_parts.py section01-mock-exam-1 --keep-parts --dry-run
 
 # 解説の整合・文体・訳・用語（正誤印 x Correct Answers / glossary の禁止訳語 / style の各規則）
 python scripts/check_style.py section0*/quiz.csv --sections sections.md

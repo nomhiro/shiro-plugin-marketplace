@@ -212,3 +212,46 @@ def test_create_section_points_to_review_and_invariants():
     assert "check_invariants.py" in text
     assert "source_scope" in text
     assert "raw ドリフト" in text
+
+
+# --- 出題傾向の校正・粒度・精読後の保護（ある講座6本300問の作問で踏んだ事故） ---------
+
+def test_create_section_calibrates_question_style_before_authoring():
+    """校正より前に作った本は、後の粒度見直しで約3割を差し替えた。"""
+    text = _skill("create-section")
+    assert "Step 2.7: 出題傾向の校正" in text
+    assert "中核論点を繰り返し問う" in text
+    assert "論点と正解を先に決めてから書かせる" in text
+    assert "--dry-run" in text
+    assert "問う中身の粒度は drill も mock も同じ" in text
+    assert "ステップ6: 出題傾向の校正" in _skill("research-cert-docs")
+
+
+def test_review_section_rechecks_balance_and_marks_the_section_reviewed():
+    text = _skill("review-section")
+    assert "${CLAUDE_PLUGIN_ROOT}/scripts/check_option_balance.py" in text
+    assert "${CLAUDE_PLUGIN_ROOT}/scripts/audit_course.py" in text
+    assert "${CLAUDE_PLUGIN_ROOT}/scripts/normalize_spacing.py" in text
+    assert ".reviewed" in text
+    assert "表の左右を逆に読み" in text
+
+
+def test_udemy_skills_record_the_working_api_recipes():
+    upload = _skill("upload-practice-tests")
+    assert "/api-2.0/courses/<courseId>/quizzes/<quizId>/" in upload
+    assert "`duration` は秒" in upload
+    assert "API では読めない。**" not in upload           # 旧記述（実測と食い違った）
+    assert "安全判定" in upload
+    course = _skill("create-udemy-course")
+    assert "what_you_will_learn_data" in course
+    assert "taught-courses" in course
+    assert "判断と理由を `udemy-course-meta.md` に記録する" in course
+    assert "2つ目が効いた" in _skill("udemy-bulk-upload")
+
+
+def test_author_brief_template_no_longer_prefers_unused_concepts():
+    """「未使用の概念を優先」は周辺論点への流れを生んだ（3本で80問以上の差し戻し）。"""
+    tmpl = (PLUGIN / "templates" / "exam-course" / "AUTHOR-BRIEF.md.tmpl").read_text(encoding="utf-8")
+    assert "まだ一度も使われていない概念**を優先する" not in tmpl
+    assert "## 12. 出題の型と粒度" in tmpl
+    assert "--dry-run" in tmpl

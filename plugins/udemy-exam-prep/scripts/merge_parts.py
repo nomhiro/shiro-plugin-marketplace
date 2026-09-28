@@ -313,9 +313,19 @@ def unmerged_edits(section: Path, merged: list[list[str]], part_files: list[Path
     return out
 
 
+# 精読レビュー（review-section）の修正は quiz.csv にだけ入り、_parts には戻らない。
+# review-section がこの印を置き、以後の結合は --force でも拒否する。
+#
+# > 実績: 精読で400件以上直した本に対し、作問エージェントが自己検査のつもりで
+# > `merge_parts.py --force` を実行しかけた。_parts は精読前の内容なので、
+# > 通っていれば精読の修正がすべて消えていた。
+REVIEWED_MARKER = ".reviewed"
+
+
 def merge(
     section: Path, profile: dict, keep_parts: bool,
     normalize: bool = False, force: bool = False,
+    dry_run: bool = False, discard_review: bool = False,
 ) -> dict:
     parts_dir = section / "_parts"
     if not parts_dir.is_dir():
@@ -385,7 +395,18 @@ def merge(
     quiz = section / "quiz.csv"
     as_is = [list(HEADER)] + [r for _, _, body, _ in loaded for r in body]
     lost = unmerged_edits(section, as_is, [p for _, p, _, _ in loaded])
-    if lost and not force:
+    reviewed = (section / REVIEWED_MARKER).is_file()
+    if lost and force and reviewed and not discard_review:
+        print(
+            f"FAIL {quiz}: 精読レビュー済み（{section / REVIEWED_MARKER}）の本です。"
+            f"--force でも上書きしません（_parts に無い手直し {len(lost)} 件が消えます）"
+        )
+        print(
+            "  直すときは quiz.csv を直接編集する。どうしても結合し直すなら、"
+            "精読の修正が消えることを承知のうえで --discard-review-edits を付ける"
+        )
+        raise SystemExit(1)
+    if lost and not force and not dry_run:
         print(
             f"FAIL {quiz}: 結合し直すと消える手直しが {len(lost)} 件あります。"
             "上書きせずに停止しました"
@@ -397,7 +418,9 @@ def merge(
             "捨ててよければ --force を付けてください"
         )
         raise SystemExit(1)
-    if lost:
+    if lost and dry_run:
+        print(f"WARN {quiz}: 結合し直すと消える手直しが {len(lost)} 件あります（--dry-run のため書き込みません）")
+    elif lost:
         print(f"NOTE: --force。_parts に無い手直し {len(lost)} 件を上書きします")
 
     # 日本語と英数字の間の半角スペース（パート間・パート内の割れ）
@@ -415,7 +438,7 @@ def merge(
                 new_row, n = normalize_row_spacing(row, spacing["majority"])
                 new_body.append(new_row)
                 changed += n
-            if changed:
+            if changed and not dry_run:
                 # パートにも書き戻す（書き戻さないと次の結合で割れが戻る）
                 write_rows(csv_path, [list(HEADER)] + new_body)
                 loaded[k] = (did, csv_path, new_body, meta)
@@ -445,6 +468,13 @@ def merge(
         per_domain[did] = len(body)
 
     quiz = section / "quiz.csv"
+    bank_out = section / "_parts" / "bank-rows.md"
+    if dry_run:
+        # 何も書かない。配分・Domain 列・meta 行数・消える手直しの検査だけを行う
+        return {"total": global_no, "per_domain": per_domain,
+                "bank_rows": str(bank_out), "warnings": warnings,
+                "spacing": spacing, "normalized": normalized, "dry_run": True,
+                "lost": lost}
     write_rows(quiz, merged)
 
     errors = validate_csv(quiz)
@@ -485,11 +515,26 @@ def main(argv: list[str]) -> int:
         "--force", action="store_true",
         help="quiz.csv / quiz.raw.csv に _parts に無い手直しがあっても上書きする（手直しは失われる）",
     )
+    ap.add_argument(
+        "--dry-run", action="store_true",
+        help="何も書き込まずに検査だけ行う（配分・Domain 列・meta 行数・消える手直し）。作問の自己検査用",
+    )
+    ap.add_argument(
+        "--discard-review-edits", action="store_true",
+        help=f"精読レビュー済み（{REVIEWED_MARKER}）の本でも --force で上書きする（精読の修正は失われる）",
+    )
     a = ap.parse_args(argv[1:])
 
     profile = load_profile(a.sections)
     result = merge(Path(a.section), profile, a.keep_parts,
-                   normalize=a.normalize, force=a.force)
+                   normalize=a.normalize, force=a.force,
+                   dry_run=a.dry_run, discard_review=a.discard_review_edits)
+
+    if result.get("dry_run"):
+        print(f"OK: {a.section} のパートは結合できます（--dry-run。何も書き込んでいません）")
+        for did, n in result["per_domain"].items():
+            print(f"  {did}: {n}")
+        return 0
 
     print(f"OK: {a.section}/quiz.csv に {result['total']} 問を結合")
     for did, n in result["per_domain"].items():

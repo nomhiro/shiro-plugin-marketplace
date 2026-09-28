@@ -11,7 +11,9 @@
   2. CSV 整合性の検証
   2.5 解説の整合・文体・訳・用語（正誤印 x Correct Answers・glossary の禁止訳語など）
   3. 出典の検査（認定ページ・旧ホストの混入、出典の欠落）
-  4. 正解肢の長さバイアス検出（margin。内容修正が必要なのでシャッフル前に置く）
+  4. 正解肢の長さバイアス検出（margin・正解肢が全部最長。内容修正が必要なのでシャッフル前に置く）
+  4.1 シナリオ率（front matter の範囲。本の種類・本ごとに指定できる）
+  4.2 粒度（上限値・課金・API の版を問う問題の WARN）
   5. 出典 URL のロケール正規化（冪等）
   6. ドメイン配分の検証（question-bank 追記前）
   7. question-bank.md に追記
@@ -156,6 +158,10 @@ def main(argv: list[str]) -> int:
         "--force", action="store_true",
         help="quiz.csv / quiz.raw.csv に _parts に無い手直しがあっても結合で上書きする",
     )
+    ap.add_argument(
+        "--discard-review-edits", action="store_true",
+        help="精読レビュー済み（.reviewed）の本でも --force で上書きする（精読の修正は失われる）",
+    )
     a = ap.parse_args(argv[1:])
 
     section = Path(a.section)
@@ -168,6 +174,8 @@ def main(argv: list[str]) -> int:
         merge_argv.append("--normalize")
     if a.force:
         merge_argv.append("--force")
+    if a.discard_review_edits:
+        merge_argv.append("--discard-review-edits")
     run("1. パートの結合", merge_argv)
     run("2. CSV 整合性", [str(HERE / "validate_quiz_csv.py"), quiz])
     # 形式検証では検出できない欠陥（正解番号が誤答肢を指している・訳の欠落・
@@ -182,8 +190,14 @@ def main(argv: list[str]) -> int:
         src_argv.append("--check-urls")
     run("3. 出典の検査", src_argv)
 
-    run("4. 正解肢の長さバイアス（margin）",
+    run("4. 正解肢の長さバイアス（margin・正解肢が全部最長）",
         [str(HERE / "check_option_balance.py"), quiz])
+    # 範囲の指定（scenario_ratio / scenario_ratio_min / _max）が無ければ SKIP で通る
+    run("4.1 シナリオ率（本ごとの範囲）",
+        [str(HERE / "check_scenario_ratio.py"), a.section, "--sections", a.sections])
+    # 既定は WARN（止めない）。front matter の granularity.severity: fail で止める
+    run("4.2 粒度（上限値・課金・API の版が答えを決めていないか）",
+        [str(HERE / "check_granularity.py"), quiz, "--sections", a.sections])
     run("5. 出典 URL の正規化", [str(HERE / "normalize_urls.py"), quiz])
     run("6. ドメイン配分（question-bank 追記前）",
         [str(HERE / "validate_exam.py"), "--sections", a.sections, quiz])

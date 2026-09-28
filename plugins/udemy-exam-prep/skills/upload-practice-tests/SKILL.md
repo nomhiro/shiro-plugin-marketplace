@@ -202,6 +202,11 @@ API DELETE 後もカリキュラムページにテスト枠が残ることがあ
   3. 公開
 ```
 
+**Claude Code の自動モードでは、公開ボタンを押す操作が安全判定（実世界の取引）で止められることがある。**
+止められたら別の手段で押し切らず、ユーザーに押してもらい、結果を更新履歴に記録する
+（実績: 方針欄に記載が無い講座で、ユーザーが「公開して」と指示したがブラウザ操作が拒否された。
+ユーザーが自分で押した）。
+
 **公開方針はプロジェクトの `CLAUDE.md` を優先して読む。** プロジェクトによっては、ユーザーの承認のうえで審査提出・公開（「変更内容を公開」を含む）を自動化の対象に変えている（`CLAUDE.md` のワークフロー図や方針欄に、変更日とともに書かれている）。その記載があればそれに従って押してよい。**記載がなければ、審査提出と公開ボタンは押さない。** ここは人が判断する工程。
 
 > 実績: あるプロジェクトでは `CLAUDE.md` でユーザー承認のうえ公開も自動化対象に変えていたのに、本スキルの「押さない」と食い違っていた。プロジェクトの方針を先に読む順序にした。
@@ -279,9 +284,36 @@ await fetch('/api-2.0/quizzes/<quizId>/assessments/?page_size=1'
   + '&fields[assessment]=prompt,correct_response,section', { credentials: 'include' });
 ```
 
-> **テストの設定値（時間・合格点・ランダム化）は API では読めない。**
-> `/api-2.0/quizzes/<id>/?fields[quiz]=...` は 404 を返す。
-> **編集画面のフォーム値を読む**のが確実（講師が見る値そのもの）。
+> **テストの設定値（時間・合格点・ランダム化）は、コース配下のパスなら API で読み書きできる。**
+> `/api-2.0/quizzes/<id>/` は 404 だが、`/api-2.0/courses/<courseId>/quizzes/<quizId>/` は通る。
+> **`duration` は秒**（60分 = 3600）。PATCH で保存したあと、編集画面のフォームにも
+> 同じ値（分・%・ON）が出ることを確かめた。
+>
+> ```javascript
+> // 読む
+> await (await fetch('/api-2.0/courses/<courseId>/quizzes/<quizId>/'
+>   + '?fields[quiz]=duration,pass_percent,is_randomized', { credentials: 'include' })).json();
+> // 書く（CSRF は cookie の csrftoken を X-CSRFToken に）
+> await fetch('/api-2.0/courses/<courseId>/quizzes/<quizId>/', { method: 'PATCH',
+>   credentials: 'include', headers: { 'Content-Type': 'application/json',
+>   'X-CSRFToken': csrf, 'X-Requested-With': 'XMLHttpRequest' },
+>   body: JSON.stringify({ duration: 2700, pass_percent: 70, is_randomized: true }) });
+> ```
+>
+> カリキュラムの一覧（テスト名・quizId・順序・時間・合格点）は
+> `/api-2.0/courses/<courseId>/instructor-curriculum-items/?fields[quiz]=title,type,id,duration,pass_percent`
+> で読める。**テストの作成（POST）は 403** なので、作成だけは画面で行う（[[udemy-bulk-upload]] ステップ4）。
+
+### ★ 投入後は全問を quiz.csv とハッシュで照合する
+
+件数・ドメイン内訳・タイプ内訳に加えて、**問題文・正解・選択肢数・選択肢別解説の数・全体解説の有無**を
+全問まとめて照合できる。API 側（`/api-2.0/quizzes/<quizId>/assessments/?page_size=200&fields[assessment]=prompt,correct_response`）
+で1問ごとに「空白を除いた問題文 : 正解（a,b…）: 選択肢数 : 解説数 : 全体解説の有無」を作り、
+並べ替えて連結した SHA256 を、ローカルの quiz.csv から同じ規則で作った値と比べる。
+問題文は API 側を `textContent` にしてから空白を除く（HTML の `<br>` や `<p>` の差を消す）。
+
+> 実績: ある講座の6本300問でこの照合が6本とも一致した。件数とドメイン内訳だけでは、
+> 正解の取り違えや選択肢の欠落は見つからない。
 
 ### ★ 演習テストは「末尾」ではなく「現在位置の下」に追加される
 

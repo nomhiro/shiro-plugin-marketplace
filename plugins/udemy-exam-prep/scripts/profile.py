@@ -120,6 +120,7 @@ def validate_profile(profile: dict) -> list[str]:
         errs.extend(_validate_sections(profile, seen, total))
 
     errs.extend(_validate_source_scope(profile))
+    errs.extend(_validate_scenario_ratio(profile))
 
     return errs
 
@@ -370,6 +371,7 @@ def section_specs(profile: dict) -> list:
                 "questions": sec["questions"],
                 "minutes": sec["minutes"],
                 "quota": dict(quota) if quota else dict(globally),
+                "scenario_ratio": sec.get("scenario_ratio"),
             }
         )
     return specs
@@ -394,6 +396,100 @@ def resolve_section(profile: dict, ref):
         if part in by_slug:
             return by_slug[part]
     return None
+
+
+# --- シナリオ率の範囲 ---------------------------------------------------------
+#
+# 旧版は `scenario_ratio_min`（全体の下限）しか持たなかった。下限だけだと
+# シナリオを盛りすぎる方向の偏りを止められない。
+#
+# > 実績: ある講座のフル模試1本目がシナリオ率 88% になった。公式の練習評価は
+# > 約 60%（概念問題は短い定義型が中心）で、本番より「読ませる」模試になっていた。
+#
+# 一方で分野別演習（drill）は時間に余裕のある学習用で、シナリオ率が高くてよい。
+# 全体に1つの上限をかけると drill が落ちるので、**本の種類ごと**・**本ごと**に
+# 範囲を持てるようにする。優先順位は 本ごと > 種類ごと > 全体。
+#
+#   scenario_ratio_min: "30%"          # 全体（旧来のキー。そのまま使える）
+#   scenario_ratio_max: "90%"          # 全体の上限（任意）
+#   scenario_ratio:                    # 種類ごと（任意）
+#     mock: {min: "55%", max: "65%"}
+#   sections:
+#     - slug: section03-mock-exam-1
+#       scenario_ratio: {max: "70%"}   # 本ごと（任意）
+
+
+def parse_ratio(value):
+    """"60%" / 0.6 / 60 を 0〜1 の小数にする。空・None は None。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(value)
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return v / 100 if v > 1 else v
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if raw.endswith("%"):
+        return float(raw[:-1]) / 100
+    v = float(raw)
+    return v / 100 if v > 1 else v
+
+
+def scenario_bounds(profile: dict, spec: dict | None = None) -> tuple:
+    """その本に適用するシナリオ率の (下限, 上限) を返す。未指定の側は None。"""
+    lo = parse_ratio(profile.get("scenario_ratio_min"))
+    hi = parse_ratio(profile.get("scenario_ratio_max"))
+    by_kind = profile.get("scenario_ratio") or {}
+    layers = []
+    if spec is not None and isinstance(by_kind, dict):
+        layers.append(by_kind.get(spec.get("kind")))
+    if spec is not None:
+        layers.append(spec.get("scenario_ratio"))
+    for layer in layers:
+        if isinstance(layer, dict):
+            if layer.get("min") is not None:
+                lo = parse_ratio(layer.get("min"))
+            if layer.get("max") is not None:
+                hi = parse_ratio(layer.get("max"))
+    return lo, hi
+
+
+def _validate_scenario_ratio(profile: dict) -> list[str]:
+    errs: list[str] = []
+    candidates = [
+        ("scenario_ratio_min", profile.get("scenario_ratio_min")),
+        ("scenario_ratio_max", profile.get("scenario_ratio_max")),
+    ]
+    by_kind = profile.get("scenario_ratio")
+    if by_kind is not None and not isinstance(by_kind, dict):
+        errs.append("scenario_ratio は種類（drill / mock）をキーにしたマッピングにする")
+        by_kind = {}
+    for kind, layer in (by_kind or {}).items():
+        if not isinstance(layer, dict):
+            errs.append(f"scenario_ratio.{kind} は {{min, max}} のマッピングにする")
+            continue
+        for k in ("min", "max"):
+            candidates.append((f"scenario_ratio.{kind}.{k}", layer.get(k)))
+    for sec in profile.get("sections") or []:
+        layer = sec.get("scenario_ratio") if isinstance(sec, dict) else None
+        if layer is None:
+            continue
+        if not isinstance(layer, dict):
+            errs.append(f"sections[{sec.get('slug')}].scenario_ratio は {{min, max}} のマッピングにする")
+            continue
+        for k in ("min", "max"):
+            candidates.append((f"sections[{sec.get('slug')}].scenario_ratio.{k}", layer.get(k)))
+    for label, value in candidates:
+        try:
+            v = parse_ratio(value)
+        except (TypeError, ValueError):
+            errs.append(f"{label} は \"60%\" のような割合にする（現在: {value!r}）")
+            continue
+        if v is not None and not 0 <= v <= 1:
+            errs.append(f"{label} は 0〜100% の範囲にする（現在: {value!r}）")
+    return errs
 
 
 def domain_names(profile: dict) -> dict[str, str]:
