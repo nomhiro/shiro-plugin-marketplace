@@ -42,7 +42,7 @@ from scripts._console import safe_stdout  # noqa: E402
 from scripts.check_sources import guide_pattern  # noqa: E402
 from scripts.profile import (  # noqa: E402
     domain_names, domain_quota, forbidden_sources, load_profile,
-    section_specs,
+    scenario_bounds, section_specs,
 )
 from scripts.shuffle_options import position_balance  # noqa: E402
 from scripts.validate_quiz_csv import (  # noqa: E402
@@ -261,29 +261,44 @@ def audit(profile: dict, bank_path: Path, check_urls: bool) -> tuple[list[str], 
             if out_of_band:
                 problems.append(f"{sec}: シナリオが 8-12 問の範囲外 {out_of_band}")
     else:
-        rmin = policy["ratio_min"]
-        label = (
-            f"（シナリオ率の下限 {rmin:.0%}）" if rmin is not None
-            else "（下限の指定なし）"
-        )
+        # 本ごとに (下限, 上限) を決める。本の種類（drill / mock）や本ごとの指定があれば
+        # それを優先する（front matter の scenario_ratio）。
+        def spec_for(sec: str):
+            for sp in specs:
+                if sp["slug"] == sec or sp["slug"].split("-")[0] == sec:
+                    return sp
+            return None
+
         print("")
-        print(f"問い方の型の分布{label}:")
+        print("問い方の型の分布（シナリオ率の範囲は本ごと）:")
         for sec in sorted(per_section_ts):
             dist = Counter(e["scenario"] for e in entries if e["section"] == sec)
             total = sum(dist.values())
             non = sum(n for s, n in dist.items() if s in policy["non_scenario"])
             ratio = (total - non) / total if total else 0.0
-            ng = rmin is not None and ratio < rmin
-            flag = f"  <- シナリオ率 {ratio:.1%} が下限を下回る" if ng else ""
-            print(
-                f"  {sec}: {dict(sorted(dist.items()))}"
-                f" / シナリオ率 {ratio:.1%}{flag}"
+            lo, hi = scenario_bounds(profile, spec_for(sec))
+            rng = (
+                f"{'' if lo is None else f'{lo:.0%}'}〜{'' if hi is None else f'{hi:.0%}'}"
+                if (lo is not None or hi is not None) else "指定なし"
             )
-            if ng:
+            flag = ""
+            if lo is not None and ratio < lo:
+                flag = "  <- 下限を下回る"
                 problems.append(
-                    f"{sec}: シナリオ率 {ratio:.1%} が下限 {rmin:.0%} を下回る"
+                    f"{sec}: シナリオ率 {ratio:.1%} が下限 {lo:.0%} を下回る"
                     f"（非シナリオ型 {sorted(policy['non_scenario'])} が {non}/{total} 問）"
                 )
+            elif hi is not None and ratio > hi:
+                flag = "  <- 上限を上回る"
+                problems.append(
+                    f"{sec}: シナリオ率 {ratio:.1%} が上限 {hi:.0%} を上回る"
+                    f"（非シナリオ型 {sorted(policy['non_scenario'])} が {non}/{total} 問）"
+                    " - 公式の練習評価より読ませる模試になっている。概念問題を短い定義型にする"
+                )
+            print(
+                f"  {sec}: {dict(sorted(dist.items()))}"
+                f" / シナリオ率 {ratio:.1%}（範囲 {rng}）{flag}"
+            )
 
     # 概念の再利用
     grouped = defaultdict(list)
