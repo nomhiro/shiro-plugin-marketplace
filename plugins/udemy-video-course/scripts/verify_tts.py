@@ -12,6 +12,8 @@
   - 再現率（台本の2文字組のうち認識結果にある割合）が --threshold 未満 … 読み落とし・途中で切れた
   - 適合率（認識結果の2文字組のうち台本にある割合）が --threshold 未満 … 前置き・別の文
   - 台本の冒頭／末尾の数文字が、認識結果の冒頭／末尾に無い … 1文だけの脱落・付加
+  - 台本の冒頭より前／末尾より後ろに、認識結果の文字が 6 字を超えて残る … 短い前置き・作り話の付加
+    （長い区間に20字ほど付いただけだと適合率も末尾の判定も通ってしまうため。受講者に指摘された実例）
   - スタイル指示の読み上げ（「オンライン講座」「語りかける」「カメラの前」など）
 0.6〜0.75 の区間は OK でも「要確認」と表示するので、認識結果を目で見て判断する。
 
@@ -77,8 +79,10 @@ def recognize(wav: Path, endpoint: str, cred) -> str:
     fd, tmpname = tempfile.mkstemp(prefix=f"verify_tts_{wav.stem}_", suffix=".wav")
     os.close(fd)
     tmp = Path(tmpname)
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-ar", "16000", "-ac", "1", str(tmp)],
-                   check=True)
+    # 末尾に無音を足す。合成音声の末尾の無音は 0.3 秒ほどしかなく、そのままだと STT が最後の語を
+    # 取りこぼして「〜を確認。」のように切れ、末尾切れと誤判定する（実測：10区間、足すと全部読めた）
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-af", "apad=pad_dur=1.5",
+                    "-ar", "16000", "-ac", "1", str(tmp)], check=True)
     cfg = sd.SpeechConfig(token_credential=cred, endpoint=endpoint)
     cfg.speech_recognition_language = "ja-JP"
     r = sd.SpeechRecognizer(speech_config=cfg, audio_config=sd.audio.AudioConfig(filename=str(tmp)))
@@ -120,6 +124,44 @@ def _cover(part: str, whole: str) -> float:
     return sum((a & b).values()) / n if n else 1.0
 
 
+# 台本の最初／最後の数文字が認識結果のどこに現れるかを探し、その前／後ろに残る文字数を数える。
+# 「末尾が合わない」（最後の8文字が認識結果の最後の24文字にあるか）だけでは、短い作り話が
+# 末尾に付いた事故を見逃す（実測：95秒の区間の末尾に「一番重要なテーマはSEO…」の約20字が付き、
+# 本来の末尾が24字の窓に残って OK になった。適合率も 0.88 までしか下がらない）
+EXTRA_MAX = 6   # 漢字・ひらがなでこれを超えて余っていたら NG（認識の揺れで数文字は余る）
+_ANCHOR = 8
+
+
+def _find(anchor: str, b: str, rightmost: bool) -> int | None:
+    """anchor が合う b 内の開始位置のうち、端（冒頭なら左端・末尾なら右端）に最も近いもの。
+    合う度合い 0.6 以上を優先し、無ければ最もよく合う位置（0.5 未満なら None）。
+    最もよく合う位置だけを採ると、同じ言い回しが区間の後ろにもあるとき（「1回目の応答で」と
+    「2回目の応答では」）そちらを選び、冒頭の前に余分な文があると誤判定する"""
+    n = len(anchor)
+    ps = list(range(0, max(1, len(b) - n + 1)))
+    if rightmost:
+        ps.reverse()
+    best, pos = 0.0, None
+    for p in ps:
+        c = _cover(anchor, b[p:p + n])
+        if c >= 0.6:
+            return p
+        if c > best:
+            best, pos = c, p
+    return pos if best >= 0.5 else None
+
+
+def _extra_tail(a: str, b: str) -> int:
+    p = _find(a[-_ANCHOR:], b, rightmost=True)
+    # 見つからない場合は「末尾が台本と合わない」の判定に任せる
+    return 0 if p is None else max(0, len(b) - (p + _ANCHOR))
+
+
+def _extra_head(a: str, b: str) -> int:
+    p = _find(a[:_ANCHOR], b, rightmost=False)
+    return 0 if p is None else p
+
+
 def judge(script: str, got: str, threshold: float) -> tuple[bool, float, list[str]]:
     """判定。戻り値の数値は min(再現率, 適合率)（漢字・ひらがなの2文字組で数える）。
 
@@ -145,6 +187,11 @@ def judge(script: str, got: str, threshold: float) -> tuple[bool, float, list[st
             why.append("冒頭が台本と合わない")
         if _cover(a[-8:], b[-24:]) < 0.4:
             why.append("末尾が台本と合わない")
+        head, tail = _extra_head(a, b), _extra_tail(a, b)
+        if head > EXTRA_MAX:
+            why.append(f"冒頭の前に台本に無い文（{head} 字）")
+        if tail > EXTRA_MAX:
+            why.append(f"末尾の後に台本に無い文（{tail} 字）")
     leak = [w for w in LEAK_WORDS if w in got and w not in script]
     if leak:
         why.append("スタイル指示の読み上げ（" + "・".join(leak) + "）")
