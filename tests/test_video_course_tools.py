@@ -145,3 +145,80 @@ def test_model_change_stops_before_synthesizing(monkeypatch, tmp_path):
     t.write_text(t.read_text(encoding="utf-8").replace("二枚目です。", "二枚目を直しました。"), encoding="utf-8")
     assert _run_lecture(monkeypatch, tmp_path, ["--model", "m1"], ok) == 0
     assert calls == ["speech_02.wav"]                      # 直した区間だけ作り直す
+
+
+# ---------------------------------------------------------------- 完成動画の検査
+def test_empty_runs_counts_only_long_blank_stretches():
+    from empty_frames import empty_runs
+    ink = [0.1] * 3 + [0.0] * 12 + [0.1] * 2 + [0.0] * 5 + [0.0] * 0
+    assert empty_runs(ink, min_ink=0.004, run=10) == [(3, 15)]
+    assert empty_runs([0.0] * 10, run=10) == [(0, 10)]        # 末尾まで続く空白も数える
+
+
+def test_longest_still_per_slide():
+    from still_report import longest_still
+    # 2fps。スライド1 = 0〜5秒（10フレーム）、スライド2 = 5〜10秒
+    moving = [None] + [True] * 9 + [False] * 8 + [True, True]
+    rows = longest_still(moving, [(1, 0.0, 5.0), (2, 5.0, 10.0)])
+    assert rows[0]["still"] == 0.0
+    assert rows[1]["still"] == 3.5          # 切り替わりの1フレームは数えない
+
+
+def test_final_sweep_problem_rules():
+    from final_sweep import SPEC, problems_of
+    ok = {"name": "a", "spec": SPEC, "v_s": 10.0, "a_s": 10.0, "s": 10.0, "expected_s": 10.0,
+          "lufs": -16.0, "black_n": 0, "cue_interp": None}
+    loud = dict(ok, name="b", lufs=-12.0)
+    black = dict(ok, name="c", black_n=1, black_max=0.8)
+    stale = dict(ok, name="d", s=14.0, cue_interp=2)
+    found = {(n, m.split()[0]) for n, m in problems_of([ok, ok, ok, loud, black, stale])}
+    assert ("b", "音量") in found and ("c", "黒フレーム") in found
+    assert ("d", "尺が") in found and ("d", "補間に落ちた") in found
+    assert not [p for p in problems_of([ok, ok]) if p[0] == "a"]
+
+
+def _timing(tmp_path, cues, sentences):
+    import json
+    d = tmp_path / "L1_x_audio"
+    d.mkdir()
+    p = d / "_timing.json"
+    p.write_text(json.dumps({"slides": {"2": {"cues": cues, "sentences": sentences}}}, ensure_ascii=False),
+                 encoding="utf-8")
+    return p
+
+
+def test_cue_report_counts_interpolated(tmp_path):
+    from cue_report import collect, main
+    p = _timing(tmp_path, [{"cue": "最初の一節です", "start": 1.0, "matched": True},
+                           {"cue": "落ちた一節です", "start": 5.0, "matched": False}], [])
+    rows = collect([p])
+    assert rows[0]["total"] == 2 and len(rows[0]["unmatched"]) == 1
+    assert main([str(p)]) == 1
+
+
+def test_cue_drift_finds_a_match_in_the_wrong_sentence(tmp_path):
+    from cue_drift import drifts, main
+    import json
+    sentences = [{"text": "仮想ネットワークを作ります。", "start": 2.0},
+                 {"text": "サブネットを分けます。", "start": 30.0}]
+    good = _timing(tmp_path, [{"cue": "仮想ネットワークを作ります", "start": 2.4, "matched": True}], sentences)
+    assert main([str(good)]) == 0
+    doc = json.loads(good.read_text(encoding="utf-8"))
+    doc["slides"]["2"]["cues"][0]["start"] = 29.5             # 別の文に「一致」した
+    assert drifts(doc)[0]["diff"] == 27.5
+
+
+def test_qa_scripts_run_on_a_real_mp4(tmp_path):
+    """ffmpeg がある環境だけ：白一色の動画は「空」、仕様が違う動画は異常として出る。"""
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg が無い")
+    mp4 = tmp_path / "blank.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=white:s=640x360:d=12:r=30",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=12", "-shortest",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(mp4)], check=True)
+    from empty_frames import main as ef
+    from final_sweep import main as fs
+    assert ef([str(mp4), "--run", "10"]) == 1
+    assert fs([str(mp4)]) == 1                                 # 640x360・モノラルは仕様外
