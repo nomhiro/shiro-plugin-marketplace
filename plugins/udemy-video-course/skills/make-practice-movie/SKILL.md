@@ -19,7 +19,8 @@ description: ハンズオン（実践）レクチャー専用の動画化スキ�
          → transcript-check → 【確認②】台本レビュー → build
          → qa_check.py / leakcheck.py → transcript-reviewer → 差し替え
 
-モードB  フレームを撮る → 塗り・強調 → 【検収①】強調を目視（cue_stills.py --sheets）
+モードB  フレームを撮る（ingest_shot.py）→ OCR で塗る（ocr_mask.py）→ 塗り残し 0 件（leak_check_ocr.py）
+         → 強調 → 【検収①】強調を目視（cue_stills.py --sheets）
          → _transcript_rec.md → transcript-check → 【確認②】台本レビュー
          → 音声を先に合成 → build_rec.py --audio-dir → build --video-only
          → qa_check.py / leakcheck.py → transcript-reviewer → 差し替え
@@ -27,6 +28,21 @@ description: ハンズオン（実践）レクチャー専用の動画化スキ�
 
 確認ポイントは2箇所（**タイムライン**と**台本**）。どちらも承認を得てから次へ進む。
 モードBでは①が**強調の目視検収**に替わる（タイムラインは自分で決めているため）。
+
+## 🔴 必ず回す検査（1本を「完成」と書く条件）
+
+次をすべて通るまで「完成」と書かない。表の正本は `../../references/self-improvement.md`。
+
+| いつ | 検査 | 合格 |
+|---|---|---|
+| 撮るたび | `ingest_shot.py add --expect <WxH>` | 寸法の違う枚が記録されていない |
+| 組み立ての前 | `ocr_mask.py` → `leak_check_ocr.py`（講座の規則ファイル） | 塗り残し 0 件。最後にシートで全数を目視 |
+| 組み立ての前 | `box_fit.py --check`・`cue_stills.py --sheets` | NG 0。強調を全数目視 |
+| `--audio-only` の直後 | `qa_check.py`・`verify_tts.py` | NG 0（NG はその区間だけ退避して作り直し、再照合） |
+| `build` | 終了コード | 0（TTS の失敗・音声の欠け・古い音声・モデルの混在があれば 1 で止まる） |
+| 完成後 | `leakcheck.py`・完成動画のシートで全数目視 | 映り込み・強調の位置・音と画面のずれ・沈黙に問題なし |
+| 完成後 | [[transcript-reviewer]] | 重大な指摘 0 |
+| 撮影の最後 | リソースの一覧（画面と CLI の出力） | 残り 0 件 |
 
 ## モードBの作業ディレクトリの型（実証済み・作り直し8本）
 
@@ -49,10 +65,12 @@ description: ハンズオン（実践）レクチャー専用の動画化スキ�
 手順（`<SC>` はプラグインの `scripts/`。重い処理は優先度を下げて1本ずつ走らせる）:
 
 ```bash
+python <SC>/ocr_mask.py --work . --rules <講座>/leak_rules.yaml   # raw/ を OCR で塗る → masks.json・masked/
+python <SC>/leak_check_ocr.py --work . --rules <講座>/leak_rules.yaml   # 🔴 塗り残し 0 件を確かめる
 python make_recipe.py                                  # recipe.json
 python make_json.py .                                  # slides.json / frames.json
 python <SC>/box_fit.py --work .                        # 強調枠を文字から 3px 以上離して置き直す（NG 0 を確認）
-python <SC>/render_frames.py --work .                  # raw/ → frames/
+python <SC>/render_frames.py --work .                  # raw/ → frames/（masks.json の塗り＋強調）
 python <SC>/cue_stills.py --frame-dir frames --out-dir stills --sheets   # 【検収①】全数を目視
 python <SC>/build_rec.py frames.json --frame-dir frames --out-dir .. --base <B> --slides slides.json
                                                        # 見積もりパス：台本の骨組み _transcript_rec.md
@@ -70,6 +88,12 @@ python <SC>/qa_check.py ../<B>_transcript_rec.md ; python <SC>/leakcheck.py ../<
   **その wav の尺をそのままフレームの尺にする**ので、組んでからでは動画が間延びする。
   `qa_check.py` が「ループ疑い」「途中に長い無音」を出したら、**その wav を別の場所へ退避して
   `--audio-only` をもう一度**（無い wav だけ合成される）。退避は削除でなく移動にする（比較用）。
+- 🔴 **1本の中でモデル・声を混ぜない。** 音声フォルダの manifest は本文・モデル・声を記録する。
+  既存の音声と違うモデルで `build` すると、**何も合成せずに止まる**。モデルを変える回は
+  `<basename>_audio_rec` を `.bak_<日付>` へ退避（移動）してから全区間を作る。
+  manifest にモデルの記録が無い古い音声フォルダも、最初の1回は止まる（同じモデルと確かなら `--adopt-existing`）。
+- **TTS に失敗した区間があると、`build` は動画を組まずに終了コード 1 を返す。** 失敗を無音のまま組み込まない
+  （従来の動きは `--allow-tts-failure`）。
 - 🔴 **合成音声が台本と無関係な文を読むことがある。** 実測（1本の中で4区間）：区間まるごと別の文
   （「教育的な講座は…」）、冒頭に余計な前置き（「ようこそ。オンライン講座へ…」）、冒頭の1文の脱落。
   **長さが近いと `qa_check.py` の比では見逃す。** `verify_tts.py` で STT に戻して台本と照合する
@@ -204,6 +228,9 @@ python <SC>/qa_check.py ../<B>_transcript_rec.md ; python <SC>/leakcheck.py ../<
 
 公開前に必ず点検する。**輝度の変化では見つからない。**
 
+- **モードB：`ocr_mask.py` で塗り、`leak_check_ocr.py` で 0 件を確かめる**（手順は `record-practice-screen` の
+  「塗りつぶし」）。規則は講座側の設定ファイルに置き、git に入れない。
+
 - `leakcheck.py`（**探索**）… 何が映ったか分からないときに、彩度の高い区間を洗い出す。
   開発画面はほぼ無彩色なので、写真サムネイルや色付きオーバーレイが際立つ。
   ヒットは必ず目視する。タイトルスライドや色付きの図は正当なヒット。
@@ -242,10 +269,15 @@ python <SC>/qa_check.py ../<B>_transcript_rec.md ; python <SC>/leakcheck.py ../<
 | **スライドの台本に旧版の記述が残る** | 旧スライドの台本を数か所だけ置換し、残りの文（料金・前提の数・エラーの例）が新しい手順と矛盾する | 置換リストで済ませず、スライドの台本は**全文を読み直して**新しい手順・事実と突き合わせる |
 | **撮影後に README を直して画面と食い違う** | レビューで README を直したが、撮影済みのプレビューは旧文言 | 撮影の**前に** README の説明文を自己点検する（断定の条件・事実の裏取り）。食い違いが残ったら撮り直し候補として記録する |
 | **フォルダー名の管理番号を読む** | 「L2-4 multistep tools のフォルダー」 | フォルダー名は番号を除いて読む（qa_check が拾う） |
+| **課金の断定** | 「存在するあいだ課金されます」「時間で課金」「無料です」（3本で差し戻し） | 「残っている間は課金が発生しうる」「料金はリージョン・通貨・SKU で変わるので料金ページで確かめる」まで。仕組みと金額は断定しない |
+| **画面で確かめずに「できる／できない」と言う** | 資料にある SKU や組み合わせが、作成画面の選択肢に無かった（2本） | 撮る前にその選択肢が画面にあるかを確かめ、台本を画面に合わせる。無ければ「この画面では選べない」と画面を見せて言う |
+| **同じトピックの座学と主張が食い違う** | 座学と実践で手順や制約の説明が違う（4本） | 撮影担当は座学の確定版の台本を読んでから台本を書く。レビューの観点に入れる |
+| **CLI で作ったのに画面で作ったように語る** | コンソールの操作が通らず CLI に切り替えた区間 | 「CLI で同じ設定にして作ってあります」と言う |
 
 ## 前提条件（初回のみ）
 
-1. **Python依存**：`pip install -r scripts/requirements.txt`
+1. **Python依存**：`pip install -r scripts/requirements.txt`。どの Python に入っているかは `python scripts/deps.py` で確かめる
+   （`build` は起動時に、工程に要る依存が無ければ処理を始める前に止まる）
 2. **音声合成の認証**：クラウドTTSを使う構成では、その認証を通しておく
 3. **ffmpeg / ffprobe** が PATH にあること
 4. **LibreOffice（soffice）** が PATH もしくは既定インストール先にあること
@@ -276,6 +308,9 @@ python scripts/practice_movie.py build <ID>
 | `--tolerance <n>` | build | 0.15 | タイムコード超過の許容比率 |
 | `--rec-lead-seconds <n>` | build | 0.3 | 区間開始→ナレーション開始の無音。**モードAで実操作に境界を合わせたら 0** |
 | `--audio-only` / `--video-only` | build | off | 音声だけ／動画だけ。**モードBは音声だけを先に作る** |
+| `--model <名>` | build | 環境変数 `VIDEO_COURSE_TTS_MODEL` か `gemini-3.1-flash-tts-preview` | TTS モデル。既存の音声と違えば止まる |
+| `--allow-tts-failure` | build | off | TTS の失敗・音声の欠けがあっても無音のまま組む（従来の動き） |
+| `--adopt-existing` | build | off | 記録の無い既存 wav を今回のモデル・声で作ったものとして記録する（合成しない） |
 | `--force` | analyze/build | off | キャッシュを使わず再生成 |
 
 `build_rec.py`（モードBのフレーム組み立て）側：
@@ -366,8 +401,14 @@ lectures/<section>/
 ブラウザが空いたら、次のレクチャーの撮影担当を起動
 ```
 
-- 担当への指示には、毎回**同じ規則の束**を入れる（ナレーションの規則、撮影の実測ルール、
-  資源の方針、`git add -A` 禁止）。レビューで新しい型が見つかったら、次の担当の指示に足す。
+- 担当への指示は **`../../templates/reshoot_prompt.md` から作り、講座の教訓ファイルを差し込む**
+  （雛形 `../../templates/course-lessons.md`）。依頼文の本体は講座ごとに書き直さない。
+- 担当の報告には**「新しく分かったこと（0〜3件）」を必ず入れさせ**、取りまとめ役が教訓ファイルへ転記する。
+- **5本ごとにレトロ**を行う：教訓の重複をまとめ、2本以上で出たもの・重大なものをプラグインへの反映候補にし、
+  新しい教訓と食い違う古い記述（メモリ・スキル・依頼文・スクリプト）を「廃止」にする。
+  手順と「失敗 → 検出器 → 関門 → 書き戻し先」の表は `../../references/self-improvement.md`。
+- 撮影担当が利用上限などで途中で落ちたら、痕跡（作業フォルダ・退避した音声・新しい mp4・変更ファイルの一覧）と
+  **残っているリソース**を先に確かめる。リソースがあれば消してから、続きか最初からかを決める。
 - 追跡表への書き込みやコミットは複数の担当が同時に行う。`index.lock` は待って再試行、
   他の担当の未コミットの変更を巻き込まないよう**自分の行だけをステージ**させる。
 - 1本の制作量の目安：撮影 20〜60分、後工程 30〜60分、レビュー 10〜20分、反映 20〜40分。
