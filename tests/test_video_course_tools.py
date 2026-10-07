@@ -222,3 +222,94 @@ def test_qa_scripts_run_on_a_real_mp4(tmp_path):
     from final_sweep import main as fs
     assert ef([str(mp4), "--run", "10"]) == 1
     assert fs([str(mp4)]) == 1                                 # 640x360・モノラルは仕様外
+
+
+# ---------------------------------------------------------------- 実践：OCR の黒塗りと点検
+RULES = {
+    "words": [{"pattern": r"taro|example\.com"},
+              {"pattern": "sub-name", "pad": [-60, -3, 6, 3], "template": True}],
+    "label_value": [{"pattern": r"サブスクリプション\s*ID", "width": 300}],
+    "fixed_boxes": [{"box": [1100, 0, 1300, 40], "except": "^S9"}],
+    "guid": {"enabled": True, "keep": ["672f"]},
+    "price": True,
+    "check": {"extra": ["/subscriptions/"]},
+}
+
+
+def test_ocr_mask_boxes_follow_the_rules():
+    from ocr_mask import boxes_for, compile_rules
+    r = compile_rules(RULES)
+    words = [([100, 10, 200, 30], "taro@example.com"),
+             ([100, 50, 220, 70], "サブスクリプション ID"),
+             ([100, 90, 500, 110], "id: 0f47aaaa-1111-2222-3333-444455556666 end"),
+             ([100, 130, 300, 150], "flowlog 672f0000-1111-2222-"),
+             ([100, 170, 200, 190], "$12.34/month")]
+    boxes = boxes_for("S001.jpg", words, r)
+    assert [1100, 0, 1300, 40] in boxes                       # 固定の箱
+    assert [96, 7, 204, 33] in boxes                           # 語の箱を pad だけ広げる
+    assert [224, 46, 524, 74] in boxes                         # ラベルの右の値
+    guid = [b for b in boxes if b[1] == 87]
+    assert len(guid) == 1 and guid[0][0] > 100 and guid[0][2] < 500   # GUID の部分だけ
+    assert not [b for b in boxes if b[1] == 127]               # keep の GUID は残す
+    assert [96, 167, 204, 193] in boxes                        # 金額
+    assert [1100, 0, 1300, 40] not in boxes_for("S901.jpg", [], r)   # except に当たる枚は外す
+
+
+def test_leak_check_uses_the_same_rules():
+    from ocr_mask import compile_rules, leak_hits
+    r = compile_rules(RULES)
+    words = [([0, 0, 1, 1], "taro"), ([0, 0, 1, 1], "/subscriptions/x"), ([0, 0, 1, 1], "ok"),
+             ([0, 0, 1, 1], "672f0000-1111-2222-")]
+    assert leak_hits("S001.jpg", words, r) == ["taro", "/subscriptions/x"]
+
+
+def test_leak_rules_example_parses():
+    from pathlib import Path
+    from ocr_mask import load_rules
+    p = Path(__file__).resolve().parents[1] / "plugins/udemy-video-course/templates/leak_rules.example.yaml"
+    r = load_rules(p)
+    assert r["words"] and r["label_value"] and r["guid"] and r["price"]
+
+
+def test_render_frames_adds_ocr_masks(tmp_path, monkeypatch):
+    import json
+    from PIL import Image
+    (tmp_path / "raw").mkdir()
+    Image.new("RGB", (100, 60), "white").save(tmp_path / "raw" / "S001.jpg")
+    (tmp_path / "recipe.json").write_text(json.dumps([{"src": "S001.jpg", "out": "r01.jpg"}]), encoding="utf-8")
+    (tmp_path / "masks.json").write_text(json.dumps({"S001.jpg": [[10, 10, 40, 30]]}), encoding="utf-8")
+    import render_frames
+    monkeypatch.setattr("sys.argv", ["render_frames.py", "--work", str(tmp_path)])
+    assert render_frames.main() == 0
+    im = Image.open(tmp_path / "frames" / "r01.jpg").convert("L")
+    assert im.getpixel((25, 20)) < 40 and im.getpixel((80, 50)) > 200
+
+
+# ---------------------------------------------------------------- 実践：取り込みと窓の大きさ
+def test_fit_crop_rejects_resizing():
+    from ingest_shot import fit_crop
+    assert fit_crop((1350, 703), (1350, 703), 2) == (0, 0, 1350, 703)
+    assert fit_crop((1350, 704), (1350, 703), 2) == (0, 0, 1350, 703)
+    assert fit_crop((1070, 415), (1350, 703), 2) is None       # 小さい枚は拡大しない
+    assert fit_crop((2109, 1098), (1350, 703), 2) is None      # 大きい枚も縮めない
+
+
+def test_solve_window_reproduces_measured_points():
+    """実測の2点（DPR 1.5625 の画面）から、表示領域 1350x703 になる窓の大きさを出す。"""
+    from ingest_shot import solve_window
+    samples = [((1700, 1063), (1350, 703)), ((1350, 703), (1070, 415))]
+    assert solve_window(samples, (1350, 703)) == (1700, 1063)
+
+
+def test_ingest_records_only_matching_shots(tmp_path):
+    from PIL import Image
+    from ingest_shot import main
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    Image.new("RGB", (1350, 703), "white").save(shots / "a.jpg")
+    work = tmp_path / "work"
+    assert main(["add", "--work", str(work), "--from", str(shots), "--expect", "1350x703", "rec_01", "一覧"]) == 0
+    Image.new("RGB", (1070, 415), "white").save(shots / "b.jpg")
+    assert main(["add", "--work", str(work), "--from", str(shots / "b.jpg"), "--expect", "1350x703", "rec_02"]) == 1
+    assert sorted(p.name for p in (work / "raw").iterdir()) == ["S001.jpg"]
+    assert (work / "shots.tsv").read_text(encoding="utf-8").startswith("S001\trec_01\t")
