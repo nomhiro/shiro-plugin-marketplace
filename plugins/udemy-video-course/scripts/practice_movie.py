@@ -38,6 +38,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -66,6 +67,9 @@ try:
     import lecture_movie as lm  # noqa: E402
 except ImportError as e:  # pragma: no cover
     sys.exit(f"lecture_movie の import に失敗しました（{_LM_DIR} を確認）: {e}")
+
+import audio_manifest as am  # noqa: E402
+import deps  # noqa: E402
 
 # lm から再利用する定数（別名で束ねる）
 FFMPEG = lm.FFMPEG
@@ -549,23 +553,7 @@ def _concat_segments(seg_files: list, out_mp4: Path, work_dir: Path) -> None:
                  "-movflags", "+faststart", str(out_mp4)])
 
 
-# ---------------------------------------------------------------------------
-# 音声キャッシュ（manifest: key → sha1(本文)）
-# ---------------------------------------------------------------------------
-def _load_manifest(audio_dir: Path) -> dict:
-    mf = audio_dir / ".manifest.json"
-    if mf.exists():
-        try:
-            return json.loads(mf.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    return {}
-
-
-def _save_manifest(audio_dir: Path, data: dict) -> None:
-    audio_dir.mkdir(parents=True, exist_ok=True)
-    (audio_dir / ".manifest.json").write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+# 音声キャッシュ（manifest）は audio_manifest.py に移した（本文・モデル・声を記録する）
 
 
 # ---------------------------------------------------------------------------
@@ -754,6 +742,9 @@ def cmd_build(args) -> int:
 
     over_list: list = []
     failures: list = []
+    deps.preflight({"practice"} | ({"tts"} if do_audio else set()) | ({"video"} if do_video else set()))
+    items = [(_seg_key(s), s.text) for s in segs if s.text]
+    text_of = dict(items)
 
     with tempfile.TemporaryDirectory(prefix="practice_movie_") as td:
         tmp = Path(td)
@@ -761,31 +752,51 @@ def cmd_build(args) -> int:
         # ---- 音声フェーズ ----
         if do_audio:
             print(f"\n▶ 音声生成 (model={args.model}, voice={voice})")
-            manifest = _load_manifest(job.audio_dir)
-            for s in segs:
-                if not s.text:
-                    continue
-                key = _seg_key(s)
+            manifest = am.load(job.audio_dir)
+            existing = {p.stem for p in job.audio_dir.glob("*.wav")}
+            plan = am.plan_audio(items, existing, manifest, args.model, voice, force=args.force)
+            if plan.conflicts and args.adopt_existing:
+                for key, _, _ in plan.conflicts:
+                    manifest[key] = am.make_entry(text_of[key], args.model, voice)
+                am.save(job.audio_dir, manifest)
+                print(f"  = 既存の {len(plan.conflicts)} 区間を {args.model} / {voice} "
+                      "で作ったものとして記録した（--adopt-existing）")
+            elif plan.conflicts:
+                print(am.conflict_message(plan.conflicts, args.model, voice, job.audio_dir))
+                return 1
+            for key in plan.skip:
+                print(f"  = skip {key}.wav（本文・モデル不変）")
+            for key in plan.make:
                 out_wav = job.audio_dir / f"{key}.wav"
-                digest = _sha1(s.text)
-                if out_wav.exists() and not args.force and manifest.get(key) == digest:
-                    print(f"  = skip {key}.wav（本文不変）")
-                    continue
                 print(f"  + {key}.wav")
                 try:
                     lm.synthesize_speech_file(
-                        text=s.text, style_prompt=style_prompt, voice=voice,
+                        text=text_of[key], style_prompt=style_prompt, voice=voice,
                         model=args.model, language_code=args.language_code,
                         out_wav=out_wav, tmp_dir=tmp, max_chars=args.max_chunk_chars,
                         chunk_gap=args.chunk_gap_seconds)
-                    manifest[key] = digest
-                    _save_manifest(job.audio_dir, manifest)
+                    manifest[key] = am.make_entry(text_of[key], args.model, voice)
+                    am.save(job.audio_dir, manifest)
                 except Exception as e:
                     msg = str(e).splitlines()[0][:160]
                     print(f"    ! 失敗: {key}: {msg}")
                     failures.append((key, msg))
 
         # ---- 動画フェーズ ----
+        if do_video and failures and not args.allow_tts_failure:
+            print("\n✗ TTS に失敗した区間があるため、動画は組みません"
+                  "（--allow-tts-failure で従来どおり無音のまま組む）")
+            do_video = False
+        if do_video:
+            existing = {p.stem for p in job.audio_dir.glob("*.wav")}
+            problems, warnings = am.video_problems(items, existing, am.load(job.audio_dir))
+            for w in warnings:
+                print(f"  ⚠ {w}")
+            if problems and not args.allow_tts_failure:
+                for msg in problems:
+                    print(f"✗ {msg}")
+                print("  動画は組みません（--allow-tts-failure で無音のまま組む）")
+                return 1
         if do_video:
             if not job.pptx.exists():
                 print(f"✗ スライド(pptx)が見つかりません: {job.pptx}")
@@ -946,8 +957,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"録画開始からナレーション開始までの秒（既定 {REC_LEAD_SECONDS_DEFAULT}）")
     _add_budget_opts(pb)
     # TTS / スライド関連（lm の既定に合わせる）
-    pb.add_argument("--model", default="gemini-3.1-flash-tts-preview",
-                    help="TTSモデル名（安定版は gemini-2.5-pro-tts）")
+    pb.add_argument("--model", default=os.environ.get("VIDEO_COURSE_TTS_MODEL", lm.DEFAULT_TTS_MODEL),
+                    help=f"TTSモデル名（既定は環境変数 VIDEO_COURSE_TTS_MODEL、無ければ {lm.DEFAULT_TTS_MODEL}）。"
+                         "既存の音声と違うモデルなら止まる")
+    pb.add_argument("--allow-tts-failure", action="store_true",
+                    help="TTS の失敗・音声の欠けがあっても無音のまま組む（従来の動き）")
+    pb.add_argument("--adopt-existing", action="store_true",
+                    help="manifest にモデルの記録が無い既存 wav を、今回のモデル・声で作ったものとして記録する")
     pb.add_argument("--voice", default=None,
                     help="声名（既定は指示ファイルのVoice、無ければ Callirrhoe）")
     pb.add_argument("--language-code", default="ja-JP")

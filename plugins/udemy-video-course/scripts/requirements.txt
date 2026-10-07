@@ -1,15 +1,24 @@
-# make-lecture-movie スキルの Python 依存
-# Gemini-TTS (Cloud Text-to-Speech) の prompt / model_name 対応に必要
+# udemy-video-course の Python 依存。どの Python に入っているかは `python deps.py` で確かめる
+# （PATH の先頭の Python が入れ替わると、依存が無いまま動いて処理が抜ける。各スクリプトは起動時に止める）
+
+# 音声合成：Gemini-TTS (Cloud Text-to-Speech) の prompt / model_name 対応に必要
 google-cloud-texttospeech>=2.29.0
 # pptx → PDF → PNG のレンダリング（PDF を画像化）
 PyMuPDF>=1.24.0
 # スライド枚数の取得（PNG化前のセグメント計画・audio-only でも使用）
 python-pptx>=0.6.23
-# 映り込み点検（find_text_leak.py の正規化相互相関）と変化点検出（detect_events.py）
+# 映り込み点検（find_text_leak.py の正規化相互相関）・変化点検出・完成動画の検査
 numpy>=1.26
 scipy>=1.11
 Pillow>=10.0
+# 音声の照合（verify_tts.py）：Azure Speech をキーレス（Entra ID）で呼ぶ
+azure-cognitiveservices-speech>=1.38
+azure-identity>=1.15
+# OCR による黒塗りと塗り残しの点検（ocr_mask.py / leak_check_ocr.py）。規則ファイルは YAML
+rapidocr-onnxruntime>=1.3
+opencv-python-headless>=4.8
+PyYAML>=6.0
 
 # 以下はシステム前提のため pip 対象外（参考）:
-#   - ffmpeg / ffprobe        : 動画合成・尺取得（PATH に必要）
+#   - ffmpeg / ffprobe        : 動画合成・尺取得・検査（PATH に必要）
 #   - LibreOffice (soffice)   : pptx → PDF 変換（PATH もしくは既定インストール先）

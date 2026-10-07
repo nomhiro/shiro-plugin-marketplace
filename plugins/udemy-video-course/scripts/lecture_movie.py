@@ -16,7 +16,14 @@
 
 出力:
   <section>/<basename>_audio/speech_NN.wav
+  <section>/<basename>_audio/.manifest.json   どの wav を、どの本文・モデル・声で作ったか
   <section>/<basename>.mp4
+
+終了コード:
+  0  すべて成功
+  1  TTS に失敗した区間がある／音声が無い・古い区間がある／既存の音声とモデルが違う
+     （--allow-tts-failure を付けたときだけ、従来どおり無音の静止画で組んで 0 を返す）
+  2  依存が足りない（起動時に止める）
 """
 from __future__ import annotations
 
@@ -29,6 +36,9 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+import audio_manifest as am
+import deps
 
 # Windows既定(cp932)だと ▶ ✓ 等で UnicodeEncodeError になり TTS開始前に落ちるため UTF-8 化
 try:
@@ -54,6 +64,8 @@ SLIDE_TAIL_SECONDS = 2.0     # ナレーション終了から次スライドま�
 VIDEO_WIDTH, VIDEO_HEIGHT, VIDEO_FPS = 1920, 1080, 30
 # pptx→PNG のスケール（PDF 72dpi × 倍率）。16:9 デック(960x540pt)×2 = 1920x1080
 PNG_SCALE = 2
+# TTS モデルの既定（環境変数 VIDEO_COURSE_TTS_MODEL で講座ごとに変える）
+DEFAULT_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
 
 def run(cmd: list, **kwargs) -> subprocess.CompletedProcess:
@@ -514,14 +526,19 @@ def main() -> None:
                     help="実践（ハンズオン）レクチャーも生成する（既定はスキップ。実践は自分の声で収録するため）")
     ap.add_argument("--audio-only", action="store_true", help="音声(wav)のみ生成")
     ap.add_argument("--video-only", action="store_true", help="動画(mp4)のみ生成")
-    ap.add_argument("--model", default="gemini-3.1-flash-tts-preview",
-                    help="TTSモデル名（既定=最新flash。高音質安定版は gemini-2.5-pro-tts）")
+    ap.add_argument("--model", default=os.environ.get("VIDEO_COURSE_TTS_MODEL", DEFAULT_TTS_MODEL),
+                    help=f"TTSモデル名（既定は環境変数 VIDEO_COURSE_TTS_MODEL、無ければ {DEFAULT_TTS_MODEL}）。"
+                         "1本の中でモデルを混ぜない（既存の音声と違えば止まる）")
     ap.add_argument("--voice", default=None,
                     help="声名（既定は指示ファイルのVoice、無ければ Callirrhoe）")
     ap.add_argument("--language-code", default="ja-JP")
     ap.add_argument("--instruction", default=None,
                     help="スタイル指示ファイル（既定: <repo>/vertexai-tts-instruction.md）")
     ap.add_argument("--force", action="store_true", help="既存のwav/mp4も再生成")
+    ap.add_argument("--allow-tts-failure", action="store_true",
+                    help="TTS の失敗・音声の欠けがあっても無音の静止画で組んで終了コード 0 を返す（従来の動き）")
+    ap.add_argument("--adopt-existing", action="store_true",
+                    help="manifest に記録の無い既存 wav を、今回のモデル・声で作ったものとして記録する（合成はしない）")
     ap.add_argument("--default-still-seconds", type=float, default=4.0,
                     help="台本が無いスライドの表示秒数")
     ap.add_argument("--max-chunk-chars", type=int, default=250,
@@ -558,6 +575,9 @@ def main() -> None:
     voice_default = "Callirrhoe"
     do_audio = not args.video_only
     do_video = not args.audio_only
+    if not args.dry_run:
+        deps.preflight({"pptx"} | ({"tts"} if do_audio else set()) | ({"video"} if do_video else set()))
+    rc = 0
 
     print(f"■ 対象レクチャー: {len(jobs)} 件")
     for job in jobs:
@@ -601,30 +621,57 @@ def main() -> None:
             failed: list[tuple[str, int, str]] = []
 
             # ---- 音声フェーズ ----
+            items = [(seg.speech_name, seg.text) for seg in segments if seg.text]
+            text_of = dict(items)
+            page_of = {seg.speech_name: seg.page_index for seg in segments if seg.speech_name}
             if do_audio:
                 print(f"▶ 音声生成 (model={args.model}, voice={voice})")
-                for seg in segments:
-                    if not seg.text:
-                        continue
-                    out_wav = job.audio_dir / seg.speech_name
-                    if out_wav.exists() and not args.force:
-                        print(f"  = skip {seg.speech_name}（既存）")
-                        continue
-                    print(f"  + {seg.speech_name}（スライド{seg.page_index}）")
+                manifest = am.load(job.audio_dir)
+                existing = {p.name for p in job.audio_dir.glob("speech_*.wav")}
+                plan = am.plan_audio(items, existing, manifest, args.model, voice, force=args.force)
+                if plan.conflicts and args.adopt_existing:
+                    for key, _, _ in plan.conflicts:
+                        manifest[key] = am.make_entry(text_of[key], args.model, voice)
+                    am.save(job.audio_dir, manifest)
+                    print(f"  = 既存の {len(plan.conflicts)} 区間を {args.model} / {voice} "
+                          "で作ったものとして記録した（--adopt-existing）")
+                elif plan.conflicts:
+                    print(am.conflict_message(plan.conflicts, args.model, voice, job.audio_dir))
+                    rc = 1
+                    continue
+                for key in plan.skip:
+                    print(f"  = skip {key}（本文・モデル不変）")
+                for key in plan.make:
+                    out_wav = job.audio_dir / key
+                    print(f"  + {key}（スライド{page_of[key]}）")
                     try:
                         synthesize_speech_file(
-                            text=seg.text, style_prompt=style_prompt, voice=voice,
+                            text=text_of[key], style_prompt=style_prompt, voice=voice,
                             model=args.model, language_code=args.language_code,
                             out_wav=out_wav, tmp_dir=tmp, max_chars=args.max_chunk_chars,
                             chunk_gap=args.chunk_gap_seconds)
-                    except Exception as e:  # 1セグメントの失敗で全体を止めない
+                        manifest[key] = am.make_entry(text_of[key], args.model, voice)
+                        am.save(job.audio_dir, manifest)
+                    except Exception as e:  # 1セグメントの失敗で残りの合成は止めない
                         msg = str(e).splitlines()[0][:160]
-                        print(f"    ! 失敗: {seg.speech_name}（スライド{seg.page_index}）: {msg}")
-                        failed.append((seg.speech_name, seg.page_index, msg))
+                        print(f"    ! 失敗: {key}（スライド{page_of[key]}）: {msg}")
+                        failed.append((key, page_of[key], msg))
 
             # ---- 動画フェーズ ----
-            if do_video:
-                if job.out_mp4.exists() and not args.force:
+            if do_video and failed and not args.allow_tts_failure:
+                print("  ✗ TTS に失敗した区間があるため、動画は組みません"
+                      "（--allow-tts-failure で従来どおり無音の静止画で組む）")
+            elif do_video:
+                existing = {p.name for p in job.audio_dir.glob("speech_*.wav")}
+                problems, warnings = am.video_problems(items, existing, am.load(job.audio_dir))
+                for w in warnings:
+                    print(f"  ⚠ {w}")
+                if problems and not args.allow_tts_failure:
+                    for msg in problems:
+                        print(f"  ✗ {msg}")
+                    print("  動画は組みません（--allow-tts-failure で無音の静止画のまま組む）")
+                    rc = 1
+                elif job.out_mp4.exists() and not args.force:
                     print(f"= skip {job.out_mp4.name}（既存）")
                 else:
                     print("▶ スライドをPNGへレンダリング")
@@ -641,12 +688,17 @@ def main() -> None:
                         tail_seconds=args.slide_tail_seconds)
 
             if failed:
-                print(f"  ⚠ 失敗セグメント {len(failed)} 件（動画では無音静止になります）:")
+                print(f"  ⚠ 失敗セグメント {len(failed)} 件:")
                 for name, page, msg in failed:
                     print(f"     - {name}（スライド{page}）: {msg}")
-                print("    対処: 再実行（誤検知は時間を置くと通る場合あり）、台本の言い回し変更、"
-                      "または --model gemini-2.5-pro-tts を試す。")
+                print("    対処: 再実行（無い wav だけ作られる。時間を置くと通る場合あり）、台本の言い回し変更。"
+                      "モデルを変えるときは、1本の中で混ぜないよう音声フォルダを退避して全区間を作り直す。")
+                if not args.allow_tts_failure:
+                    rc = 1
 
+    if rc:
+        print("\n✗ 失敗があります（終了コード 1）")
+        sys.exit(rc)
     print("\n✓ 完了")
 
 
