@@ -115,7 +115,7 @@ python scripts/lecture_movie.py L1-1-x
 | `--png-scale <n>` | `2` | pptx→PNG 倍率（16:9デックで 1920×1080 相当） |
 | `--force` | off | 既存の wav/mp4 も再生成（既定は本文・モデル・声が同じ wav をスキップ） |
 | `--allow-tts-failure` | off | TTS の失敗・音声の欠けがあっても無音の静止画で組み、終了コード 0 を返す（従来の動き） |
-| `--adopt-existing` | off | manifest に記録の無い既存 wav を、今回のモデル・声で作ったものとして記録する（合成はしない） |
+| `--adopt-existing` | off | manifest に記録の無い既存 wav を、今回のモデル・声・台本で作ったものとして記録する（合成はしない）。**音声を作ってから台本を直していない**と確かなときだけ |
 | `--dry-run` | off | TTS/soffice/ffmpeg を実行せず分割計画のみ表示 |
 
 ### 「間（ポーズ）」の設計

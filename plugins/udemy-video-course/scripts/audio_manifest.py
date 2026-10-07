@@ -100,7 +100,8 @@ def conflict_message(conflicts: list[tuple[str, str | None, str | None]], model:
         f"  対象: {keys}\n"
         "  1本の中でモデルを混ぜないため、何も合成せずに止めました。次のどれかで続けてください。\n"
         f"   - 全区間を作り直す：音声フォルダを別名へ退避（移動）してから再実行する（{audio_dir.name} → {audio_dir.name}.bak_<日付>）、または --force\n"
-        "   - 既存の wav が今回と同じモデル・声で作られたと確かなら：--adopt-existing で manifest に記録だけする\n"
+        "   - 既存の wav が今回と同じモデル・声で、作ってから台本を直していないと確かなら：--adopt-existing で記録だけする\n"
+        "     （記録の無い古い wav は今の台本で作ったものとして記録される。台本を直した覚えがあるなら退避して作り直す）\n"
         "   - 既存の音声のモデルに合わせる：--model / --voice をそちらに合わせる")
 
 

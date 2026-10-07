@@ -538,7 +538,8 @@ def main() -> None:
     ap.add_argument("--allow-tts-failure", action="store_true",
                     help="TTS の失敗・音声の欠けがあっても無音の静止画で組んで終了コード 0 を返す（従来の動き）")
     ap.add_argument("--adopt-existing", action="store_true",
-                    help="manifest に記録の無い既存 wav を、今回のモデル・声で作ったものとして記録する（合成はしない）")
+                    help="manifest に記録の無い既存 wav を、今回のモデル・声・台本で作ったものとして記録する（合成はしない）。"
+                         "その音声を作ってから台本を直していないと確かなときだけ使う")
     ap.add_argument("--default-still-seconds", type=float, default=4.0,
                     help="台本が無いスライドの表示秒数")
     ap.add_argument("--max-chunk-chars", type=int, default=250,

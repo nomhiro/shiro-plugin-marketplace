@@ -313,3 +313,58 @@ def test_ingest_records_only_matching_shots(tmp_path):
     assert main(["add", "--work", str(work), "--from", str(shots / "b.jpg"), "--expect", "1350x703", "rec_02"]) == 1
     assert sorted(p.name for p in (work / "raw").iterdir()) == ["S001.jpg"]
     assert (work / "shots.tsv").read_text(encoding="utf-8").startswith("S001\trec_01\t")
+
+
+# ---------------------------------------------------------------- practice_movie build の音声フェーズ
+def _practice(tmp_path):
+    sec = tmp_path / "lectures" / "02_y"
+    sec.mkdir(parents=True)
+    t = sec / "L2-1-3_実践_y_transcript_rec.md"
+    t.write_text("## スライド1: 表紙\n\n始めます。\n\n## 録画1 [00:00-00:10]: 一覧\n\n一覧を開きます。\n",
+                 encoding="utf-8")
+    return sec, t
+
+
+def _run_practice(monkeypatch, transcript, argv, synth):
+    import practice_movie
+    monkeypatch.setattr(practice_movie.deps, "preflight", lambda groups, **k: None)
+    monkeypatch.setattr(practice_movie.lm, "synthesize_speech_file", synth)
+    args = practice_movie.build_parser().parse_args(["build", str(transcript), "--audio-only", *argv])
+    return args.func(args)
+
+
+def _writer(calls):
+    def ok(**kw):
+        calls.append(kw["out_wav"].name)
+        kw["out_wav"].parent.mkdir(parents=True, exist_ok=True)
+        kw["out_wav"].write_bytes(b"RIFF")
+    return ok
+
+
+def test_practice_tts_failure_returns_nonzero(monkeypatch, tmp_path):
+    _, t = _practice(tmp_path)
+
+    def boom(**kw):
+        raise RuntimeError("503")
+    assert _run_practice(monkeypatch, t, [], boom) == 1
+
+
+def test_practice_legacy_manifest_stops_until_adopted(monkeypatch, tmp_path):
+    """モデルの記録が無い古い manifest（値が本文のハッシュだけ）は、何も作らずに止まる。"""
+    import json
+    from audio_manifest import text_digest
+    sec, t = _practice(tmp_path)
+    adir = sec / "L2-1-3_実践_y_audio_rec"
+    adir.mkdir()
+    for k in ("slide_01", "rec_01"):
+        (adir / f"{k}.wav").write_bytes(b"RIFF")
+    (adir / ".manifest.json").write_text(json.dumps(
+        {"slide_01": text_digest("始めます。"), "rec_01": text_digest("一覧を開きます。")}), encoding="utf-8")
+    calls = []
+    assert _run_practice(monkeypatch, t, ["--model", "m1"], _writer(calls)) == 1
+    assert calls == []
+    assert _run_practice(monkeypatch, t, ["--model", "m1", "--adopt-existing"], _writer(calls)) == 0
+    assert calls == []
+    assert _run_practice(monkeypatch, t, ["--model", "m1"], _writer(calls)) == 0   # 記録したので通る
+    assert _run_practice(monkeypatch, t, ["--model", "m2"], _writer(calls)) == 1   # 別のモデルは止まる
+    assert calls == []

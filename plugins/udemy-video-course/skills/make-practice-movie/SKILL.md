@@ -91,7 +91,7 @@ python <SC>/qa_check.py ../<B>_transcript_rec.md ; python <SC>/leakcheck.py ../<
 - 🔴 **1本の中でモデル・声を混ぜない。** 音声フォルダの manifest は本文・モデル・声を記録する。
   既存の音声と違うモデルで `build` すると、**何も合成せずに止まる**。モデルを変える回は
   `<basename>_audio_rec` を `.bak_<日付>` へ退避（移動）してから全区間を作る。
-  manifest にモデルの記録が無い古い音声フォルダも、最初の1回は止まる（同じモデルと確かなら `--adopt-existing`）。
+  manifest にモデルの記録が無い古い音声フォルダも、最初の1回は止まる（同じモデルで、その後に台本を直していないと確かなときだけ `--adopt-existing`）。
 - **TTS に失敗した区間があると、`build` は動画を組まずに終了コード 1 を返す。** 失敗を無音のまま組み込まない
   （従来の動きは `--allow-tts-failure`）。
 - 🔴 **合成音声が台本と無関係な文を読むことがある。** 実測（1本の中で4区間）：区間まるごと別の文
@@ -310,7 +310,7 @@ python scripts/practice_movie.py build <ID>
 | `--audio-only` / `--video-only` | build | off | 音声だけ／動画だけ。**モードBは音声だけを先に作る** |
 | `--model <名>` | build | 環境変数 `VIDEO_COURSE_TTS_MODEL` か `gemini-3.1-flash-tts-preview` | TTS モデル。既存の音声と違えば止まる |
 | `--allow-tts-failure` | build | off | TTS の失敗・音声の欠けがあっても無音のまま組む（従来の動き） |
-| `--adopt-existing` | build | off | 記録の無い既存 wav を今回のモデル・声で作ったものとして記録する（合成しない） |
+| `--adopt-existing` | build | off | 記録の無い既存 wav を今回のモデル・声・台本で作ったものとして記録する（合成しない）。音声を作ってから台本を直していないときだけ |
 | `--force` | analyze/build | off | キャッシュを使わず再生成 |
 
 `build_rec.py`（モードBのフレーム組み立て）側：

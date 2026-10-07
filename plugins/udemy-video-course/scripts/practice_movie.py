@@ -963,7 +963,8 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--allow-tts-failure", action="store_true",
                     help="TTS の失敗・音声の欠けがあっても無音のまま組む（従来の動き）")
     pb.add_argument("--adopt-existing", action="store_true",
-                    help="manifest にモデルの記録が無い既存 wav を、今回のモデル・声で作ったものとして記録する")
+                    help="manifest にモデルの記録が無い既存 wav を、今回のモデル・声・台本で作ったものとして記録する。"
+                         "その音声を作ってから台本を直していないと確かなときだけ使う")
     pb.add_argument("--voice", default=None,
                     help="声名（既定は指示ファイルのVoice、無ければ Callirrhoe）")
     pb.add_argument("--language-code", default="ja-JP")
