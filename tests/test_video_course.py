@@ -16,7 +16,7 @@ SKILLS = PLUGIN / "skills"
 AGENTS = PLUGIN / "agents"
 SCRIPTS = PLUGIN / "scripts"
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 MARKETPLACE_VERSION = "0.8.0"
 
 EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen"}
@@ -26,9 +26,17 @@ EXPECTED_SCRIPTS = {
     "build_rec.py", "redact.py", "stage_diagram.py",
     "qa_check.py", "leakcheck.py", "find_text_leak.py",
     "detect_events.py", "shift_lead.py",
+    "audio_manifest.py", "deps.py", "verify_tts.py",
+    "empty_frames.py", "still_report.py", "final_sweep.py", "cue_report.py", "cue_drift.py",
+    "ocr_mask.py", "leak_check_ocr.py", "ingest_shot.py",
 }
+EXPECTED_REFERENCES = {"tts-readings.md", "quality-standards.md", "self-improvement.md"}
+EXPECTED_TEMPLATES = {"reshoot_prompt.md", "course-lessons.md", "leak_rules.example.yaml"}
 # 特定の講座に固定されている痕跡が残っていたら退行
 FORBIDDEN = ("AI-103", "Foundry", "GitHub Copilot 講座", "成果物規約.md", "カリキュラム設計書.md")
+# 特定の講座・個人の環境の痕跡。スキルだけでなく、スクリプト・リファレンス・テンプレートの全部で禁止
+# （クラウドのリソース名やキーの名前は、ここに書くこと自体が公開になるので載せない。PR の前に手で検索する）
+COURSE_TOKENS = ("AZ-700", "az700", "7334843", "C:/Python313", r"C:\Python313", "zoomfix")
 
 
 def _load(p):
@@ -91,6 +99,35 @@ def test_no_course_specific_leftovers():
         text = p.read_text(encoding="utf-8")
         for token in FORBIDDEN:
             assert token not in text, f"{p}: 講座固有語 '{token}' が残っている"
+
+
+def test_no_course_tokens_anywhere_in_the_plugin():
+    exts = {".md", ".py", ".json", ".yaml", ".yml", ".txt"}
+    for p in PLUGIN.rglob("*"):
+        if p.is_file() and p.suffix in exts and "__pycache__" not in p.parts:
+            text = p.read_text(encoding="utf-8")
+            for token in COURSE_TOKENS:
+                assert token not in text, f"{p}: 講座・環境の識別子 '{token}' が残っている"
+
+
+def test_references_and_templates_exist():
+    assert EXPECTED_REFERENCES <= {p.name for p in (PLUGIN / "references").glob("*")}
+    assert EXPECTED_TEMPLATES <= {p.name for p in (PLUGIN / "templates").glob("*")}
+
+
+def test_gates_are_wired_into_the_skills():
+    """検出器を作っても、スキルの手順から呼ばれなければ回らない。"""
+    lecture = (SKILLS / "make-lecture-movie" / "SKILL.md").read_text(encoding="utf-8")
+    practice = (SKILLS / "make-practice-movie" / "SKILL.md").read_text(encoding="utf-8")
+    record = (SKILLS / "record-practice-screen" / "SKILL.md").read_text(encoding="utf-8")
+    for token in ("必ず回す検査", "verify_tts", "empty_frames", "final_sweep", "self-improvement.md",
+                  "quality-standards.md"):
+        assert token in lecture, token
+    for token in ("必ず回す検査", "ocr_mask", "leak_check_ocr", "reshoot_prompt.md", "self-improvement.md"):
+        assert token in practice, token
+    for token in ("デスクトップに触らない", "URL で直接飛ばない", "ocr_mask", "leak_check_ocr",
+                  "ingest_shot", "重大：残存リソース", "course-lessons.md"):
+        assert token in record, token
 
 
 def test_reviewer_agent_is_wired_into_the_pipeline():

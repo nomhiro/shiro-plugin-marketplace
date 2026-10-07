@@ -230,7 +230,7 @@ RULES = {
               {"pattern": "sub-name", "pad": [-60, -3, 6, 3], "template": True}],
     "label_value": [{"pattern": r"サブスクリプション\s*ID", "width": 300}],
     "fixed_boxes": [{"box": [1100, 0, 1300, 40], "except": "^S9"}],
-    "guid": {"enabled": True, "keep": ["672f"]},
+    "guid": {"enabled": True, "keep": ["beef"]},
     "price": True,
     "check": {"extra": ["/subscriptions/"]},
 }
@@ -241,8 +241,8 @@ def test_ocr_mask_boxes_follow_the_rules():
     r = compile_rules(RULES)
     words = [([100, 10, 200, 30], "taro@example.com"),
              ([100, 50, 220, 70], "サブスクリプション ID"),
-             ([100, 90, 500, 110], "id: 0f47aaaa-1111-2222-3333-444455556666 end"),
-             ([100, 130, 300, 150], "flowlog 672f0000-1111-2222-"),
+             ([100, 90, 500, 110], "id: abcd1234-1111-2222-3333-444455556666 end"),
+             ([100, 130, 300, 150], "flowlog beef0000-1111-2222-"),
              ([100, 170, 200, 190], "$12.34/month")]
     boxes = boxes_for("S001.jpg", words, r)
     assert [1100, 0, 1300, 40] in boxes                       # 固定の箱
@@ -259,7 +259,7 @@ def test_leak_check_uses_the_same_rules():
     from ocr_mask import compile_rules, leak_hits
     r = compile_rules(RULES)
     words = [([0, 0, 1, 1], "taro"), ([0, 0, 1, 1], "/subscriptions/x"), ([0, 0, 1, 1], "ok"),
-             ([0, 0, 1, 1], "672f0000-1111-2222-")]
+             ([0, 0, 1, 1], "beef0000-1111-2222-")]
     assert leak_hits("S001.jpg", words, r) == ["taro", "/subscriptions/x"]
 
 
