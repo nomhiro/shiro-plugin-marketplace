@@ -28,6 +28,15 @@ az login 済みで、エンドポイントのリソースに推論のロール�
 
 NG が出た区間は、wav を退避して再合成し、もう一度このスクリプトで確かめる。
 同じ区間で繰り返すなら、英字・小数・日付・パスの羅列を言い換える。
+
+**全区間が「認識結果が空」になったら、音声ではなく照合先を疑う。** 実測で2つの原因があった。
+  - 照合先のリソースが消えていた（別講座の後片付けで削除され、DNS が引けなくなった）。
+    照合先は講座のハンズオン用のリソースから切り離し、複数講座で共用するものにする。
+  - 認証の取得が間に合わなかった（az の起動が遅いと既定の 10 秒で切れる。レンダと並走したとき）。
+    そのため `DefaultAzureCredential(process_timeout=60)` にしている。
+2区間以上を照合して全部が空のときは、NG とは別の終了コード 3（照合先エラー）で止める。
+
+終了コード: 0＝全区間 OK／1＝NG あり／2＝引数の誤り／3＝照合先エラーの疑い（全区間が空）。
 """
 from __future__ import annotations
 
@@ -66,6 +75,22 @@ def parse(md: Path) -> dict[str, str]:
         elif cur:
             secs[cur] += line.strip()
     return secs
+
+
+def lecture_speech_names(secs: dict[str, str]) -> dict[str, str]:
+    """座学の区間キー（slide_NN）→ 音声ファイル名（speech_NN.wav）。
+
+    lecture_movie.py は、本文のある `## スライドN:` に**台本のある順で** 01 から番号を振る。
+    スライド番号そのものではないので、本文の無いスライドが途中にあると番号がずれる。
+    """
+    slides = sorted((k for k, v in secs.items() if k.startswith("slide_") and v.strip()),
+                    key=lambda k: int(k[6:]))
+    return {k: f"speech_{i:02d}.wav" for i, k in enumerate(slides, 1)}
+
+
+def all_empty(results: list[dict]) -> bool:
+    """2区間以上を照合し、全部の認識結果が空なら True（照合先の故障を疑う）。"""
+    return len(results) >= 2 and all(not (r.get("recognized") or "").strip() for r in results)
 
 
 def norm(t: str) -> str:
@@ -221,14 +246,16 @@ def main() -> int:
             adir = a.transcript.parent / f"{base}_audio"
     secs = parse(a.transcript)
     keys = a.keys or list(secs)
+    speech_names = lecture_speech_names(secs)
     from azure.identity import DefaultAzureCredential
-    cred = DefaultAzureCredential()
+    # az の起動が重いとき（レンダと並走など）既定の 10 秒で切れ、全区間が「認識結果が空」になる
+    cred = DefaultAzureCredential(process_timeout=60)
     results, bad = [], 0
     print(f"■ verify-tts: {base}（{len(keys)} 区間）")
     for k in keys:
         wav = adir / f"{k}.wav"
-        if not wav.exists() and k.startswith("slide_"):
-            wav = adir / f"speech_{k[6:]}.wav"   # 座学の音声の名前
+        if not wav.exists() and k in speech_names:
+            wav = adir / speech_names[k]   # 座学の音声の名前（台本のある順の通し番号）
         if k not in secs or not wav.exists():
             print(f"  -- {k}: 台本か wav が無い")
             continue
@@ -246,6 +273,10 @@ def main() -> int:
     if a.json:
         a.json.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"\n  NG {bad} / {len(results)}")
+    if all_empty(results):
+        print("  !! 全区間が「認識結果が空」です。音声ではなく照合先（エンドポイントの DNS・認証・ロール）を"
+              "疑ってください。NG の区間を作り直す前に、1区間だけ認識させて原因を確かめる。", file=sys.stderr)
+        return 3
     return 1 if bad else 0
 
 
