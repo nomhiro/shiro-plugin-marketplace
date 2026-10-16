@@ -19,12 +19,23 @@
 
 使い方:
     python verify_tts.py <..._transcript_rec.md> --endpoint https://<resource>.cognitiveservices.azure.com/
+    python verify_tts.py <台本> --backend google                         # Google Cloud Speech-to-Text
     python verify_tts.py <台本> --endpoint ... --keys rec_27 rec_44     # 指定した区間だけ
     python verify_tts.py <台本> --endpoint ... --json result.json
 
-前提: pip install azure-cognitiveservices-speech azure-identity、ffmpeg が PATH にあること、
-az login 済みで、エンドポイントのリソースに推論のロール（Foundry User など）があること。
-エンドポイントは環境変数 SPEECH_ENDPOINT でも渡せる。
+照合先（--backend。環境変数 VERIFY_TTS_BACKEND でも渡せる。省略時はエンドポイントがあれば azure、無ければ google）:
+  - azure  … Azure AI Speech をキーレス（Entra ID）で呼ぶ。pip install azure-cognitiveservices-speech azure-identity、
+              az login 済みで、エンドポイントのリソースに推論のロール（Foundry User など）があること。
+              エンドポイントは --endpoint か環境変数 SPEECH_ENDPOINT
+  - google … Google Cloud Speech-to-Text（v1・latest_long・句読点あり）を ADC で呼ぶ。pip install google-cloud-speech、
+              gcloud auth application-default login 済みで、プロジェクトの Speech-to-Text API が有効なこと。
+              Gemini-TTS と同じプロジェクトで完結する。インラインで送れる音声は 1 分までなので、
+              長い区間は**いちばん静かな所で 55 秒以内に切って**順に認識し、つないでから判定する
+              （long_running_recognize もインラインは 1 分までで、超えると GCS を求められた。実測）
+どちらも ffmpeg が PATH にあること。判定（judge）は照合先によらず同じ。
+
+**STT の綴りだけで「誤読」と決めない。** STT はヒントの語に引かれて同じ音を別の語に綴る（「ドッカー」→「ロッカー」）。
+同じ区間で NG が繰り返し、作り直しても同じ綴りが出るときは、hira_check.py で音をひらがなで確かめてから作り直す。
 
 NG が出た区間は、wav を退避して再合成し、もう一度このスクリプトで確かめる。
 同じ区間で繰り返すなら、英字・小数・日付・パスの羅列を言い換える。
@@ -97,8 +108,43 @@ def norm(t: str) -> str:
     return NORM_RE.sub("", t).lower()
 
 
-def recognize(wav: Path, endpoint: str, cred) -> str:
-    import azure.cognitiveservices.speech as sd
+BACKENDS = ("azure", "google")
+GOOGLE_MAX_SEC = 55.0     # インラインで送れるのは 1 分まで（recognize も long_running_recognize も）。余裕を見て 55 秒
+GOOGLE_CUT_SEARCH = 15.0  # 切れ目は、窓の終わりから手前この秒数の中で、いちばん静かな所に置く（語の途中で切らない）
+
+
+def pick_backend(arg: str | None, env: str | None, endpoint: str | None) -> str:
+    """照合先を決める。明示（引数 → 環境変数）が優先。無ければエンドポイントの有無で決める
+    （既存の `--endpoint` だけの呼び方は、これまでどおり Azure で動く）。"""
+    b = (arg or env or ("azure" if endpoint else "google")).strip().lower()
+    if b not in BACKENDS:
+        raise ValueError(f"未知の照合先: {b}（{' / '.join(BACKENDS)}）")
+    return b
+
+
+def cut_points(samples, rate: int, max_sec: float = GOOGLE_MAX_SEC, search: float = GOOGLE_CUT_SEARCH,
+               frame_ms: int = 100) -> list[int]:
+    """長い音声を max_sec 以内の塊に切るサンプル位置（先頭 0 と末尾を含む）。
+    切れ目は各窓の終わりから手前 search 秒の中で、平均振幅がいちばん小さい frame_ms の位置（無音の間）にする。"""
+    n, step = len(samples), max(1, rate * frame_ms // 1000)
+    limit = int(max_sec * rate)
+    pts = [0]
+    while n - pts[-1] > limit:
+        start = pts[-1]
+        lo = start + max(step, int((max_sec - search) * rate))
+        hi = start + limit - step
+        best, best_e = hi, None
+        for i in range(lo, hi, step):
+            e = sum(abs(v) for v in samples[i:i + step])
+            if best_e is None or e < best_e:
+                best, best_e = i + step // 2, e
+        pts.append(best)
+    pts.append(n)
+    return pts
+
+
+def _prepare(wav: Path) -> Path:
+    """照合用に 16kHz・モノへ変換し、末尾に無音を足した一時ファイルを返す（呼んだ側が消す）。"""
     # 一時ファイルは一意の名前にする（区間名だけだと、並行実行した別レクチャーの同名区間と上書きし合い、
     # 他の回の音声を認識して「台本と別の文」と誤判定する。実測で起きた）
     fd, tmpname = tempfile.mkstemp(prefix=f"verify_tts_{wav.stem}_", suffix=".wav")
@@ -108,6 +154,56 @@ def recognize(wav: Path, endpoint: str, cred) -> str:
     # 取りこぼして「〜を確認。」のように切れ、末尾切れと誤判定する（実測：10区間、足すと全部読めた）
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(wav), "-af", "apad=pad_dur=1.5",
                     "-ar", "16000", "-ac", "1", str(tmp)], check=True)
+    return tmp
+
+
+def recognize_google(wav: Path, client) -> str:
+    """Google Cloud Speech-to-Text で認識する。"""
+    import wave
+
+    from google.cloud import speech
+    tmp = _prepare(wav)
+    try:
+        # WAV ヘッダを剥がして PCM だけを送る（ヘッダごと・句読点なしで送ると、語単位の認識で
+        # 数秒ぶんの語が落ちた実測がある）
+        with wave.open(str(tmp), "rb") as w:
+            pcm = w.readframes(w.getnframes())
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    import array
+    samples = array.array("h", pcm[:len(pcm) - len(pcm) % 2])
+    pts = cut_points(samples, 16000)
+    cfg = speech.RecognitionConfig(
+        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16, sample_rate_hertz=16000,
+        language_code="ja-JP", model="latest_long", enable_automatic_punctuation=True)
+    out = []
+    for a, b in zip(pts, pts[1:]):
+        audio = speech.RecognitionAudio(content=samples[a:b].tobytes())
+        # 応答待ちのまま数時間止まったプロセスがあった。必ず timeout を付ける
+        resp = client.recognize(config=cfg, audio=audio, timeout=180)
+        out += [r.alternatives[0].transcript for r in resp.results if r.alternatives]
+    return "".join(out)
+
+
+def make_recognizer(backend: str, endpoint: str | None):
+    """wav → 認識結果の文字列、を返す関数を作る。認証は1回だけ取る。"""
+    if backend == "azure":
+        from azure.identity import DefaultAzureCredential
+        # az の起動が重いとき（レンダと並走など）既定の 10 秒で切れ、全区間が「認識結果が空」になる
+        cred = DefaultAzureCredential(process_timeout=60)
+        return lambda wav: recognize(wav, endpoint, cred)
+    from google.cloud import speech
+    client = speech.SpeechClient()
+    return lambda wav: recognize_google(wav, client)
+
+
+def recognize(wav: Path, endpoint: str, cred) -> str:
+    """Azure AI Speech で認識する。"""
+    import azure.cognitiveservices.speech as sd
+    tmp = _prepare(wav)
     cfg = sd.SpeechConfig(token_credential=cred, endpoint=endpoint)
     cfg.speech_recognition_language = "ja-JP"
     r = sd.SpeechRecognizer(speech_config=cfg, audio_config=sd.audio.AudioConfig(filename=str(tmp)))
@@ -227,14 +323,21 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("transcript", type=Path)
     ap.add_argument("--audio-dir", type=Path, default=None)
-    ap.add_argument("--endpoint", default=os.environ.get("SPEECH_ENDPOINT"))
+    ap.add_argument("--backend", choices=BACKENDS, default=None,
+                    help="照合先（省略時は環境変数 VERIFY_TTS_BACKEND、それも無ければエンドポイントの有無で決める）")
+    ap.add_argument("--endpoint", default=os.environ.get("SPEECH_ENDPOINT"), help="azure のときのエンドポイント")
     ap.add_argument("--keys", nargs="*", default=None, help="rec_01 slide_02 … を指定（省略時は全区間）")
     ap.add_argument("--threshold", type=float, default=0.6,
                     help="再現率・適合率（漢字・ひらがなの2文字組）の下限。0.6〜0.75 は目視で確かめる帯")
     ap.add_argument("--json", type=Path, default=None)
     a = ap.parse_args()
-    if not a.endpoint:
-        print("--endpoint か SPEECH_ENDPOINT を指定してください", file=sys.stderr)
+    try:
+        backend = pick_backend(a.backend, os.environ.get("VERIFY_TTS_BACKEND"), a.endpoint)
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if backend == "azure" and not a.endpoint:
+        print("azure で照合するには --endpoint か SPEECH_ENDPOINT を指定してください", file=sys.stderr)
         return 2
     # 実践（…_transcript_rec.md ＋ …_audio_rec/slide_NN.wav・rec_NN.wav）と
     # 座学（…_transcript.md ＋ …_audio/speech_NN.wav）の両方に対応する
@@ -247,11 +350,11 @@ def main() -> int:
     secs = parse(a.transcript)
     keys = a.keys or list(secs)
     speech_names = lecture_speech_names(secs)
-    from azure.identity import DefaultAzureCredential
-    # az の起動が重いとき（レンダと並走など）既定の 10 秒で切れ、全区間が「認識結果が空」になる
-    cred = DefaultAzureCredential(process_timeout=60)
+    import deps
+    deps.preflight({"stt"} if backend == "azure" else {"stt-google"})
+    recog = make_recognizer(backend, a.endpoint)
     results, bad = [], 0
-    print(f"■ verify-tts: {base}（{len(keys)} 区間）")
+    print(f"■ verify-tts: {base}（{len(keys)} 区間・照合先 {backend}）")
     for k in keys:
         wav = adir / f"{k}.wav"
         if not wav.exists() and k in speech_names:
@@ -259,7 +362,7 @@ def main() -> int:
         if k not in secs or not wav.exists():
             print(f"  -- {k}: 台本か wav が無い")
             continue
-        got = recognize(wav, a.endpoint, cred)
+        got = recog(wav)
         ok, ratio, why = judge(secs[k], got, a.threshold)
         bad += not ok
         results.append({"key": k, "ok": ok, "score": round(ratio, 3), "why": why, "recognized": got})
@@ -274,7 +377,8 @@ def main() -> int:
         a.json.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"\n  NG {bad} / {len(results)}")
     if all_empty(results):
-        print("  !! 全区間が「認識結果が空」です。音声ではなく照合先（エンドポイントの DNS・認証・ロール）を"
+        print("  !! 全区間が「認識結果が空」です。音声ではなく照合先（azure はエンドポイントの DNS・認証・ロール、"
+              "google は ADC・API の有効化・課金）を"
               "疑ってください。NG の区間を作り直す前に、1区間だけ認識させて原因を確かめる。", file=sys.stderr)
         return 3
     return 1 if bad else 0

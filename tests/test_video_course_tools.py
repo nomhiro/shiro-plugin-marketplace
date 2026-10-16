@@ -21,6 +21,31 @@ def test_all_empty_means_the_endpoint_is_broken():
     assert not all_empty([{"recognized": ""}])          # 1区間だけでは判断しない
 
 
+def test_backend_is_explicit_first_then_endpoint():
+    """照合先は 引数 → 環境変数 → エンドポイントの有無。`--endpoint` だけの既存の呼び方は Azure のまま。"""
+    from verify_tts import pick_backend
+    assert pick_backend(None, None, "https://x.cognitiveservices.azure.com/") == "azure"
+    assert pick_backend(None, None, None) == "google"
+    assert pick_backend(None, "google", "https://x/") == "google"
+    assert pick_backend("azure", "google", None) == "azure"
+    with pytest.raises(ValueError):
+        pick_backend("whisper", None, None)
+
+
+def test_long_audio_is_cut_in_the_quiet_part_within_the_limit():
+    """Google はインラインの音声が 1 分まで。55 秒以内に、無音の所で切る（語の途中で切らない）。"""
+    from verify_tts import cut_points
+    rate = 100                                    # 1 秒 = 100 サンプルの模型
+    s = [1000] * (rate * 130)
+    s[rate * 48:rate * 49] = [0] * rate           # 48 秒目に1秒の無音
+    s[rate * 95:rate * 96] = [0] * rate           # 95 秒目に1秒の無音
+    pts = cut_points(s, rate, frame_ms=100)
+    assert pts[0] == 0 and pts[-1] == len(s)
+    assert all(b - a <= 55 * rate for a, b in zip(pts, pts[1:]))
+    assert 48 * rate <= pts[1] < 49 * rate and 95 * rate <= pts[2] < 96 * rate
+    assert cut_points([0] * (rate * 30), rate) == [0, rate * 30]   # 短ければ切らない
+
+
 # ---------------------------------------------------------------- audio_manifest
 def _mf(text, model="m1", voice="v1"):
     from audio_manifest import make_entry
@@ -368,3 +393,79 @@ def test_practice_legacy_manifest_stops_until_adopted(monkeypatch, tmp_path):
     assert _run_practice(monkeypatch, t, ["--model", "m1"], _writer(calls)) == 0   # 記録したので通る
     assert _run_practice(monkeypatch, t, ["--model", "m2"], _writer(calls)) == 1   # 別のモデルは止まる
     assert calls == []
+
+
+# ---------------------------------------------------------------- check_clicks
+def test_embedded_wav_header_is_a_click():
+    """ヘッダ付きの WAV をそのまま連結すると、44 バイトがサンプルとして鳴る。"""
+    import struct
+    from check_clicks import data_offset, head_problems
+    hdr = b"RIFF" + struct.pack("<I", 36 + 400) + b"WAVE" + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16) \
+        + b"data" + struct.pack("<I", 400)
+    assert data_offset(hdr + bytes(400)) == 44
+    assert head_problems("x.wav", hdr + bytes(400))
+    assert not head_problems("x.wav", bytes(44) + bytes(400))          # ゼロで埋めた形は通る
+
+
+def test_click_is_found_only_at_the_clip_start():
+    from check_clicks import peaks_at
+    s = [0] * 48000
+    s[24000] = 20000                                                    # 0.5 秒にクリック
+    got = dict(peaks_at(s, [0.5, 0.8]))
+    assert got[0.5] == 20000 and got[0.8] == 0
+
+
+# ---------------------------------------------------------------- hira_check
+def test_hira_windows_overlap_and_reach_the_end():
+    from hira_check import windows
+    w = windows(20.0)
+    assert w[0] == (0.0, 9.0) and w[-1][1] == 20.0
+    assert all(b > c for (_, b), (c, _) in zip(w, w[1:]))              # 隣の窓と重なる
+    assert windows(5.0) == [(0.0, 5.0)]
+
+
+# ---------------------------------------------------------------- udemy_quiz_payload
+def test_quiz_payload_shape():
+    import json
+    from udemy_quiz_payload import body, problems
+    q = {"id": "Q1", "question": "次のうち正しいものは？\n- ア **A**\n- イ B", "options": ["ア", "イ", "両方"],
+         "correct": 1, "explanation": "イが正しい。"}
+    assert not problems(q)
+    b = body(q)
+    assert b["assessment_type"] == "multiple-choice"
+    assert json.loads(b["correct_response"]) == ["b"]
+    assert "<ul>" in b["question"] and "**" not in b["question"]
+    fb = json.loads(b["feedbacks"])
+    assert fb[1].startswith("<p>正解です。</p>") and fb[0].startswith("<p>不正解です。</p>")
+    assert len(json.loads(b["answers"])) == 3
+
+
+def test_quiz_payload_rejects_broken_questions():
+    from udemy_quiz_payload import problems
+    assert problems({"question": "q", "options": ["a"], "correct": 0, "explanation": "e"})
+    assert problems({"question": "q", "options": ["a", "b"], "correct": 2, "explanation": "e"})
+    assert problems({"question": "q", "options": ["a", "b"], "correct": 0, "explanation": ""})
+
+
+# ---------------------------------------------------------------- udemy_file_server
+def test_file_server_serves_only_inside_the_root(tmp_path):
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from udemy_file_server import make_handler
+    (tmp_path / "01").mkdir()
+    (tmp_path / "01" / "002_b.mp4").write_bytes(b"BB")
+    (tmp_path / "01" / "001_a.mp4").write_bytes(b"A")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        import json
+        lst = json.loads(urllib.request.urlopen(base + "/list/01").read())
+        assert [x["name"] for x in lst] == ["001_a.mp4", "002_b.mp4"]   # 名前の昇順＝講義の順
+        r = urllib.request.urlopen(base + "/f/01/2")
+        assert r.read() == b"BB" and r.headers["Access-Control-Allow-Private-Network"] == "true"
+        with pytest.raises(Exception):
+            urllib.request.urlopen(base + "/f/01/..%2f..%2fsecret")
+    finally:
+        srv.shutdown()

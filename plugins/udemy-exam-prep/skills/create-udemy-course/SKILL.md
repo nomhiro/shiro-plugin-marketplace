@@ -79,6 +79,11 @@ JSON.stringify(j.results.map(c => [c.id, c.title, c.is_published]));
 
 ### 説明文の構成
 
+0. **AI 使用の開示（先頭の1文）** — 問題・解説の作成に AI を使う講座は、説明文の先頭に
+   「本コースにはAIの使用が含まれています。」を入れる。動画講座の公開申請で、審査からこの1文を求められた
+   （文言は変えない）。演習テスト講座でも同じ扱いになる可能性が高いので、最初から入れておく。
+   続けて「■ AI の使用について」として、出題範囲の設計と確認は講師、問題と解説の起草は AI の支援、のように役割を書いておくとよい。
+   **既存の講座に足すかどうかは、ユーザーに確かめてから**（公開中の説明文を変えることになる）
 1. コースの目的（1文）
 2. 試験概要 — front matter の `exam_code` / `questions_per_exam` / `exam.minutes` / `exam.pass_score` / `exam.max_score` / 受験料 / 有効期限 / 配信方式
 3. ドメインとウェイト（front matter の `domains`）
@@ -403,7 +408,11 @@ await fetch('/api-2.0/courses/<id>/', { method: 'PATCH', credentials: 'include',
 | レベル | `instructional_level_id`（1=初級 / 2=中級 / 3=専門 / 0=すべて） | 保存できた |
 | カテゴリ・サブカテゴリ | `primary_category_id` / `primary_subcategory_id` | **反映されなかった**。basics ページの select で設定する |
 
+画面で説明欄を直すときは、欄がリッチテキスト（ProseMirror）なので、**箇条書きはツールバーのリストボタンで作る**
+（「・」を打っても箇条書きにならない）。入力後は innerText を原稿と突き合わせる（原稿に無い語が末尾に紛れていた例がある）。
+
 演習テストの設定と投入は [[upload-practice-tests]]（テストの作成は API では 403 になる）。
+動画講座の**クイズ**（simple-quiz）は別の経路で、`udemy-video-course` の `publish-video-course` が扱う。
 
 ## ステップ5.5: 想定する学習者ページ（goals ページ）
 

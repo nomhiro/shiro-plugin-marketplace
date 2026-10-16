@@ -22,7 +22,8 @@ allowed-tools: Read, Write, Glob, Bash
 4. **LibreOffice(soffice)** で pptx → PDF → PNG（PyMuPDF）にレンダリング。
 5. ffmpeg で「スライド画像＋音声」をレクチャー単位の MP4 に合成。
 
-> 🔴 **音声を作ったら、動画を組む前に `scripts/verify_tts.py <…_transcript.md> --endpoint <Speech>` で照合する。**
+> 🔴 **音声を作ったら、動画を組む前に `scripts/verify_tts.py <…_transcript.md>` で照合する。**
+> 照合先は Azure（`--endpoint <Speech>`）か Google（`--backend google`。Gemini-TTS と同じ GCP プロジェクトで完結する）。
 > Gemini-TTS は、台本と無関係な文・**スタイル指示の読み上げ**・冒頭や末尾の脱落を起こす。
 > 実測（座学76本）：**23本・33区間**で発生し、公開済みの動画に埋もれていた。
 > 最多はスタイル指示の読み上げ（17区間）で、チャンクの切れ目に出やすい。再合成しても繰り返す区間は、
@@ -37,11 +38,12 @@ allowed-tools: Read, Write, Glob, Bash
 
 | いつ | 検査 | 合格 |
 |---|---|---|
-| 音声を作る前 | 初学者役のレビュー（用語の説明・話と絵のずれ・見た目だけの図・固有名の言い換え）と、台本の `受講者\|受講生\|講師` の grep | 指摘を直した。grep 0 件 |
+| 音声を作る前 | 初学者役のレビュー（用語の説明・話と絵のずれ・見た目だけの図・固有名の言い換え。依頼文は `templates/script-review_prompt.md`）と、台本の `受講者\|受講生\|講師` の grep | 指摘を直した。grep 0 件 |
 | 起動時（自動） | `deps.py`（工程に要る依存と、どの Python で動いているか） | 足りなければ終了コード 2 で止まる |
 | 音声の前（自動） | manifest（本文・モデル・声） | 本文が変わった区間だけ作り直す。モデル・声が既存と違えば何も作らずに止まる |
 | 音声の後 | `lecture_movie.py` の終了コード | 0（TTS の失敗があれば 1。動画は組まれない） |
-| 音声の後 | `verify_tts.py <台本> --endpoint <Speech>` を全区間 | NG 0。終了コード 3 は照合先の故障（音声を作り直さない） |
+| 音声の後 | `verify_tts.py <台本> --endpoint <Speech>`（または `--backend google`）を全区間 | NG 0。終了コード 3 は照合先の故障（音声を作り直さない）。同じ区間の NG が作り直しで変わらなければ、`hira_check.py` で音を確かめる（STT の癖のことがある） |
+| 音声の後 | `check_clicks.py <音声フォルダ>/*.wav`（合成の応答を自前でつなぐ経路・モデルを足したとき） | 0 件（ヘッダの連結によるクリック） |
 | 動画の前（自動） | 音声が無い・古い・モデルが混在する区間 | 0（あれば終了コード 1 で止まる） |
 | 完成後 | スライドの PNG・完成動画のシートを全数目視 | 抜き取りで見ない |
 | 完成後 | `empty_frames.py <mp4>` | 見出しだけの区間 0 |
@@ -186,3 +188,4 @@ lectures/<NN_section>/
 - 上流：[[make-lecture-slides]]（pptx と `_transcript.md` を作る）／[[write-lecture-doc]]（詳細原本）
 - 規約：講座リポジトリの用語規約・テンプレート／設計：カリキュラム設計書
 - 姉妹：[[make-practice-movie]]（実践レクチャーの動画化）
+- 下流：[[publish-video-course]]（Udemy の動画講座に載せる。動画のアップロード・小テスト・改名）
