@@ -283,6 +283,8 @@ def _tts_call(client, chunk: str, prompt: str, voice: str, model: str,
             language_code=language_code, name=voice, model_name=model),
         audio_config=texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.LINEAR16),
+        # 応答が返らず無期限に止まることがあった（2026-10-23/24）。超えたら DeadlineExceeded で再試行に回す
+        timeout=180,
     )
     return resp.audio_content
 
