@@ -79,11 +79,11 @@ def listen(client, model: str, data: bytes, prompt: str) -> str:
     return "ERR"
 
 
-def run(client, model: str, path: Path):
+def run(client, model: str, path: Path, win: float = 9.0, stride: float = 7.0):
     pcm, rate, ch, width = read_wav(path)
     step = ch * width
     n = len(pcm) / step / rate
-    jobs = [(a, b, p) for a, b in windows(n) for p in (P1, P2)]
+    jobs = [(a, b, p) for a, b in windows(n, win, stride) for p in (P1, P2)]
 
     def one(j):
         a, b, p = j

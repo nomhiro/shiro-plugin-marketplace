@@ -424,6 +424,17 @@ def test_hira_windows_overlap_and_reach_the_end():
     assert windows(5.0) == [(0.0, 5.0)]
 
 
+def test_hira_narrow_passes_unless_the_wrong_reading_is_the_majority():
+    """疑う読みが半分以下なら通す（STT の揺れで録り直さない）。"""
+    from hira_narrow import count_readings, suspicious
+    c = count_readings(["しゅちょう する", "しちょうする", "しゅちょうを", "べつの"], ["しゅちょう", "しちょう"])
+    assert c == {"しゅちょう": 2, "しちょう": 1}
+    assert not suspicious(c, "しゅちょう")
+    assert suspicious({"しゅちょう": 1, "しちょう": 2}, "しゅちょう")
+    assert not suspicious({"しゅちょう": 1, "しちょう": 1}, "しゅちょう")   # 同数は通す
+    assert not suspicious({"しゅちょう": 0, "しちょう": 0}, "しゅちょう")
+
+
 # ---------------------------------------------------------------- udemy_quiz_payload
 def test_quiz_payload_shape():
     import json
@@ -469,3 +480,128 @@ def test_file_server_serves_only_inside_the_root(tmp_path):
             urllib.request.urlopen(base + "/f/01/..%2f..%2fsecret")
     finally:
         srv.shutdown()
+
+
+def test_file_server_accepts_a_second_lecture_folder(tmp_path):
+    """同じ章の2本目のレクチャーは 08b のように置く（GH-300）。"""
+    import json
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from udemy_file_server import make_handler
+    (tmp_path / "08b").mkdir()
+    (tmp_path / "08b" / "01_x.mp4").write_bytes(b"X")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        assert [x["name"] for x in json.loads(urllib.request.urlopen(base + "/list/08b").read())] == ["01_x.mp4"]
+        assert urllib.request.urlopen(base + "/f/08b/1").read() == b"X"
+    finally:
+        srv.shutdown()
+
+
+# ---------------------------------------------------------------- udemy_quiz_payload（原稿から）
+QUIZ_MD = """# [L1-1] 小テスト（原稿）
+
+> 作り方のメモ。Udemy には入れない
+
+## 作り方の約束
+
+- 軸の表など
+
+## 問題
+
+### Q1
+
+あなたは、`git` を使っています。正しいものはどれですか？
+
+- A. **太字**の選択肢
+- B. 正しい選択肢 ← **正解**
+- C. ほかの選択肢
+- D. 最後の選択肢
+
+**解説**：Bは正しい。Aは、`x` なので誤りです。
+
+### Q2
+
+二つ目の問いです。
+
+- A. ア ← **正解**
+- B. イ
+
+**解説**：アが正しい。
+
+## 保留案
+
+### Q1
+
+重なって入ってはいけない問い
+
+- A. a ← **正解**
+- B. b
+
+**解説**：保留。
+"""
+
+
+def test_quiz_markdown_reads_only_the_question_section():
+    """「## 問題」の節だけを読む（後ろの「保留案」まで読むと、同じ番号の問いが重なって入った）。"""
+    from udemy_quiz_payload import parse_md, problems
+    qz = parse_md(QUIZ_MD, slug="L1-1_quiz")
+    qs = qz["questions"]
+    assert [q["id"] for q in qs] == ["L1-1_quiz-Q1", "L1-1_quiz-Q2"]
+    assert qs[0]["correct"] == 1 and len(qs[0]["options"]) == 4
+    assert qs[0]["question"].startswith("あなたは")
+    assert qs[1]["correct"] == 0
+    assert not any(problems(q) for q in qs)
+
+
+def test_quiz_for_screen_input_drops_markup_but_keeps_words():
+    """画面の入力欄は書式なし。** とバッククォートの記号を外し、中の語は残す。"""
+    from udemy_quiz_payload import parse_md, to_qs
+    q = to_qs(parse_md(QUIZ_MD, slug="s")["questions"][0])
+    assert q["a"] == 1
+    assert q["s"] == "あなたは、git を使っています。正しいものはどれですか？"
+    assert q["o"][0] == "太字の選択肢"
+    assert "`" not in q["e"] and "**" not in q["e"] and "x" in q["e"]
+
+
+# ---------------------------------------------------------------- 音声（指示ファイル・読みの辞書・退避）
+def test_style_prompt_is_off_by_default_and_stops_at_the_rule(tmp_path):
+    """演技指示は既定で渡さない。渡すときも、最初の --- より前だけ（後ろの運用メモを TTS に渡していた）。"""
+    from lecture_movie import load_voice_and_style
+    p = tmp_path / "tts-instruction.md"
+    p.write_text("Voice: Callirrhoe\n落ち着いた声で話す。\n---\n運用メモ: 演技指示は使わない\n", encoding="utf-8")
+    assert load_voice_and_style(p, "Kore") == ("Callirrhoe", "")
+    voice, style = load_voice_and_style(p, "Kore", use_style=True)
+    assert voice == "Callirrhoe" and style == "落ち着いた声で話す。"
+    assert "運用メモ" not in style
+    assert load_voice_and_style(tmp_path / "none.md", "Kore") == ("Kore", "")
+
+
+def test_readings_replace_longer_words_first(tmp_path):
+    from lecture_movie import apply_readings, load_readings
+    p = tmp_path / "tts-readings.tsv"
+    p.write_text("# 表記\t読み\nEsc\tエスク\nEscキー\tエスケープキー  # 2026-10-19 F10 で「えすくきー」\n"
+                 "pytest → パイテスト\n", encoding="utf-8")
+    r = load_readings(p)
+    assert apply_readings("Escキーを押し、pytestを回す。Escだけ。", r) == "エスケープキーを押し、パイテストを回す。エスクだけ。"
+    assert load_readings(tmp_path / "none.tsv") == []
+    p.write_text("読めない行\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_readings(p)
+
+
+def test_made_audio_is_backed_up_without_overwriting(tmp_path):
+    from lecture_movie import backup_audio
+    a = tmp_path / "audio"
+    a.mkdir()
+    (a / "speech_01.wav").write_bytes(b"1")
+    (a / "speech_02.wav").write_bytes(b"2")
+    (a / "audio_manifest.json").write_text("{}", encoding="utf-8")
+    d1 = backup_audio(a, ["speech_01.wav"], tmp_path / "bk", "L1-1")
+    d2 = backup_audio(a, ["speech_02.wav"], tmp_path / "bk", "L1-1")
+    assert d1 != d2 and d2.name == "L1-1-2"
+    assert sorted(x.name for x in d1.iterdir()) == ["audio_manifest.json", "speech_01.wav"]
+    assert backup_audio(a, [], tmp_path / "bk", "L1-1") is None

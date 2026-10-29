@@ -736,15 +736,20 @@ def cmd_build(args) -> int:
     instruction_path = Path(args.instruction) if args.instruction \
         else job.repo_root / "vertexai-tts-instruction.md"
     voice, style_prompt = lm.load_voice_and_style(instruction_path,
-                                                  default_voice="Callirrhoe")
+                                                  default_voice="Callirrhoe",
+                                                  use_style=args.style)
     if args.voice:
         voice = args.voice
 
     over_list: list = []
     failures: list = []
     deps.preflight({"practice"} | ({"tts"} if do_audio else set()) | ({"video"} if do_video else set()))
-    items = [(_seg_key(s), s.text) for s in segs if s.text]
+    # 読みの辞書は TTS に渡す文だけに当てる（画面・字幕は台本の表記のまま）。manifest も置き換えた後の文で持つ
+    readings = lm.load_readings(Path(args.readings) if args.readings
+                                else job.repo_root / "tts-readings.tsv")
+    items = [(_seg_key(s), lm.apply_readings(s.text, readings)) for s in segs if s.text]
     text_of = dict(items)
+    made: list[str] = []
 
     with tempfile.TemporaryDirectory(prefix="practice_movie_") as td:
         tmp = Path(td)
@@ -777,10 +782,14 @@ def cmd_build(args) -> int:
                         chunk_gap=args.chunk_gap_seconds)
                     manifest[key] = am.make_entry(text_of[key], args.model, voice)
                     am.save(job.audio_dir, manifest)
+                    made.append(f"{key}.wav")
                 except Exception as e:
                     msg = str(e).splitlines()[0][:160]
                     print(f"    ! 失敗: {key}: {msg}")
                     failures.append((key, msg))
+            if made and not args.no_backup:
+                dest = lm.backup_audio(job.audio_dir, made, job.repo_root / "_audio-backup", job.basename)
+                print(f"  ⇒ 退避 {len(made)} 区間 → {dest}")
 
         # ---- 動画フェーズ ----
         if do_video and failures and not args.allow_tts_failure:
@@ -969,7 +978,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="声名（既定は指示ファイルのVoice、無ければ Callirrhoe）")
     pb.add_argument("--language-code", default="ja-JP")
     pb.add_argument("--instruction", default=None,
-                    help="スタイル指示ファイル（既定: <repo>/vertexai-tts-instruction.md）")
+                    help="声の指示ファイル（既定: <repo>/vertexai-tts-instruction.md）。声名は Voice の行から取る")
+    pb.add_argument("--style", action="store_true",
+                    help="指示ファイルの最初の --- より前を演技指示として TTS に渡す（既定は渡さない）")
+    pb.add_argument("--readings", default=None,
+                    help="読みの辞書（既定: <repo>/tts-readings.tsv。無ければ使わない）。表記<TAB>読み")
+    pb.add_argument("--no-backup", action="store_true",
+                    help="作った音声を <repo>/_audio-backup/<日付>/ に退避しない（既定は退避する）")
     pb.add_argument("--max-chunk-chars", type=int, default=250,
                     help="TTS分割の文字数上限（2分バグ回避）")
     pb.add_argument("--chunk-gap-seconds", type=float, default=lm.CHUNK_GAP_SECONDS,
