@@ -639,7 +639,7 @@ BadRequest で拒否された**（`Cannot disable or delete the last origin ...`
 
 ## 次の工程
 
-**Hyperframes のスライド型（[[make-slide-lecture]]）で組むとき**は、塗り済みの静止画（`masked/`）を、そのまま実践の本体のユニットに置く。
+**Hyperframes のスライド型（スキル `make-slide-lecture`（次の版で追加。今は講座側の tools/ で組む））で組むとき**は、塗り済みの静止画（`masked/`）を、そのまま実践の本体のユニットに置く。
 `_rec.mp4` は作らない。以下は旧経路（`_rec.mp4` → make-practice-movie）の流れ。
 
 撮影（`ingest_shot.py add`）→ **OCR で塗る（`ocr_mask.py`）→ 塗り残し 0 件（`leak_check_ocr.py`）**

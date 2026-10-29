@@ -599,9 +599,9 @@ def test_made_audio_is_backed_up_without_overwriting(tmp_path):
     a.mkdir()
     (a / "speech_01.wav").write_bytes(b"1")
     (a / "speech_02.wav").write_bytes(b"2")
-    (a / "audio_manifest.json").write_text("{}", encoding="utf-8")
+    (a / ".manifest.json").write_text("{}", encoding="utf-8")
     d1 = backup_audio(a, ["speech_01.wav"], tmp_path / "bk", "L1-1")
     d2 = backup_audio(a, ["speech_02.wav"], tmp_path / "bk", "L1-1")
     assert d1 != d2 and d2.name == "L1-1-2"
-    assert sorted(x.name for x in d1.iterdir()) == ["audio_manifest.json", "speech_01.wav"]
+    assert sorted(x.name for x in d1.iterdir()) == [".manifest.json", "speech_01.wav"]
     assert backup_audio(a, [], tmp_path / "bk", "L1-1") is None

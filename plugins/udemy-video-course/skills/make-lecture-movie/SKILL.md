@@ -11,7 +11,7 @@ allowed-tools: Read, Write, Glob, Bash
 > **位置づけ**：スライド（`.pptx`）と台本（`_transcript.md`）の**下流**。1レクチャー＝1デック＝1台本（basename 共通）。
 > 上流の `write-lecture-doc`（解説ドキュメント）・`make-lecture-slides`（pptx と台本）は**プラグインに入っていない**。講座側に用意するか、pptx と台本を手で作る。
 >
-> **新しい講座では、Hyperframes のスライド型（[[make-slide-lecture]]）を先に検討する。** 図解を語りに合わせて出せ、検査の道具と slide-reviewer がそろっている。
+> **新しい講座では、Hyperframes のスライド型（スキル `make-slide-lecture`（次の版で追加。今は講座側の tools/ で組む））を先に検討する。** 図解を語りに合わせて出せ、検査の道具と slide-reviewer がそろっている。
 > pptx の型は、制作者から受けた指摘（教材感・空の箱・切り替えの多さ）への対処が入っていない旧経路として残す。
 >
 > **由来**：Marp ベースの先行実装を土台に、入力スライドを **Marp md → PowerPoint(.pptx)** に、レクチャー単位を **ページ分割 → basename ペア解決**に移植したもの。TTS・「間」・ffmpeg 合成のコアは流用。
@@ -112,7 +112,7 @@ python scripts/lecture_movie.py L1-1-x
 | `--include-practice` | off | 実践（ハンズオン）も生成する（既定は実践をスキップ＝実践は録画を軸に別の経路で組むため） |
 | `--style` | off | 指示ファイルの最初の `---` より前を演技指示として TTS に渡す（既定は渡さない。`tts-readings.md` C6） |
 | `--readings` | `<repo>/tts-readings.tsv` | 読みの辞書（`表記<TAB>読み`）。TTS に渡す文だけに当てる。無ければ使わない |
-| `--no-backup` | off | 作った音声を `<repo>/_audio-backup/<日付>/<basename>/` に退避しない（既定は退避する） |
+| `--no-backup` | off | 作った音声を `<repo>/_audio-backup/<日付>/<basename>/` に退避しない（既定は退避する。講座の `.gitignore` に `_audio-backup/` を入れる） |
 | `--audio-only` / `--video-only` | 両方 | フェーズを限定 |
 | `--model <名>` | 環境変数 `VIDEO_COURSE_TTS_MODEL`、無ければ `gemini-3.1-flash-tts-preview` | TTSモデル。**既存の音声と違うモデルなら止まる**（1本の中で混ぜない） |
 | `--voice <名>` | 指示ファイルの Voice（`Callirrhoe`） | 読み上げ音声 |

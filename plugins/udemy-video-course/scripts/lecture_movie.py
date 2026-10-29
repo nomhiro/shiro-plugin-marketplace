@@ -418,7 +418,7 @@ def backup_audio(audio_dir: Path, names: list[str], backup_root: Path, label: st
         i += 1
         dest = base.with_name(f"{base.name}-{i}")
     dest.mkdir(parents=True)
-    for f in files + [p for p in audio_dir.glob("*manifest*.json")]:
+    for f in files + [p for p in [audio_dir / am.MANIFEST_NAME] if p.exists()]:
         shutil.copy2(f, dest / f.name)
     return dest
 

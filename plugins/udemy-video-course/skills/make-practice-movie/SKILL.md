@@ -12,11 +12,11 @@ description: ハンズオン（実践）レクチャー専用の動画化スキ�
 > **位置づけ**：[[make-lecture-movie]] の姉妹スキル＝ハンズオン専用。座学は従来どおり
 > `make-lecture-movie` が担当し、そちらは実践レクチャーを既定でスキップする（実践は録画を軸に別の経路で組むため）。
 >
-> **新しい講座では、Hyperframes のスライド型（[[make-slide-lecture]]）を先に検討する。** 座学と実践の本体を同じ型・同じ声で組め、
+> **新しい講座では、Hyperframes のスライド型（スキル `make-slide-lecture`（次の版で追加。今は講座側の tools/ で組む））を先に検討する。** 座学と実践の本体を同じ型・同じ声で組め、
 > 冒頭・本体・末尾を1本の講義にできる（2026-10 のハンズオン中心の講座は全部この型で作った）。
 > このスキルは、録画（`_rec.mp4`）から組む旧経路として残す。録画の撮り方（[[record-practice-screen]]）は両方の経路で共通。
 
-> **演技指示は既定で渡さない**（`--style` で渡す）。読みの辞書は `<repo>/tts-readings.tsv`。作った音声は `<repo>/_audio-backup/<日付>/` に自動で退避する（`--no-backup` で止める）。
+> **演技指示は既定で渡さない**（`--style` で渡す）。読みの辞書は `<repo>/tts-readings.tsv`。作った音声は `<repo>/_audio-backup/<日付>/` に自動で退避する（`--no-backup` で止める。講座の `.gitignore` に `_audio-backup/` を入れる）。
 
 ## パイプライン
 

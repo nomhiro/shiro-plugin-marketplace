@@ -11,7 +11,7 @@ allowed-tools: Read, Write, Glob, Grep, Bash
 （長文の入れ方・コース画像・規約上の注意）は `create-udemy-course` と同じなので、そちらを読む。
 このスキルは**動画講座に固有の部分**だけを持つ。
 
-実績:
+実績は次の2つ。
 - 座学中心の講座（2026-10）: 座学 241 本・約 19 時間・12 セクション。枠の作成から動画のアップロード（失敗 0）、小テスト 51 本・158 問。書き込みは API
 - ハンズオン中心の講座（2026-10）: 10 セクション・講義 65（動画 64＋記事 1）・小テスト 24・約 5 時間半。**書き込みはすべて画面の操作**（API の POST は止められた）。審査の差し戻し1件（ボーナス レクチャーの講義名）に対応
 
@@ -190,7 +190,7 @@ python scripts/udemy_quiz_payload.py --from-md lectures/04_ide/L4-1_quiz.md -o q
    - **1回の JS は2問まで。** 4問を1回で回すと 45 秒で結果が返らない（ページの中では最後まで動く。10 秒待って API で確かめる）
    - `__submit` は保存のあと assessments API で、その小テストの問いの数・正解の位置・見返す講義を返す。**画面のフォームが消えたことは、保存できた証拠にならない**
 
-画面の罠（どれも実際に起きた）:
+画面の罠は次のとおり（どれも実際に起きた）。
 - **「新しい問題」のボタンは、ページに小テストの数だけある（隠れている分も）。** 1つ目を押すと別の小テストのフォームが開く。親を何段かたどって名前を探す書き方では、セクション全体が当たって**別の小テストに3問入った**。「名前を含む一番近い親の中に『新しい問題』が1つだけ」のものを選ぶ（`__newq` はそうしている）
 - 1問目のボタンは「＋ 質問」、2問目からは「新しい問題」
 - **4つ目の回答欄は、3つ目に入力すると現れる**（`__fillq` は待ってから入れる）。ref で入れるときは read_page を取り直す（ref は毎回ずれる。`find` は古い ref を返すことがある）
@@ -264,7 +264,7 @@ await (await fetch(`/api-2.0/quizzes/<quiz_id>/assessments/?page_size=50&fields[
 
 ## 関連
 
-- 上流：`make-slide-lecture`（Hyperframes のスライド型。座学と実践の本体）・`make-lecture-movie`／`make-practice-movie`（旧経路）
+- 上流：`make-slide-lecture`（Hyperframes のスライド型。座学と実践の本体。次の版で追加）・`make-lecture-movie`／`make-practice-movie`（旧経路）
 - コースの基本情報・画像・長文の入れ方：`udemy-exam-prep` の `create-udemy-course`
 - 演習テスト（practice test）：`udemy-exam-prep` の `udemy-bulk-upload` / `upload-practice-tests`
 - 小テストの作り方：`references/quiz-authoring.md`。補助関数：`templates/udemy_quiz_helpers.js`
