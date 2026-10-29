@@ -19,6 +19,16 @@ words:
     pad: [-60, -3, 6, 3]    # 名前の前に付く文字（アイコンや接頭辞）まで塗る
     template: true          # 見つかった切り抜きで全枚数を照合し、OCR の読み落としも塗る
 
+# GitHub・クラウド IDE を撮る講座の典型（必要なものだけ残す）
+#  - pattern: "<GitHub のアカウント名>"              # 右上・作者の欄・ターミナルのプロンプト・URL
+#  - pattern: "<別のアカウント名>"                   # Fork の確認に使った別のアカウント
+#  - pattern: "<組織名>"
+#  - pattern: "<Codespace の名前（ランダムな2語）>"   # 例: ステータスバー・タブの題名
+#  - pattern: "<ほかのリポジトリの名前1>|<名前2>"     # セッションの一覧・最近のリポジトリ
+#  - pattern: '\d+ (seconds|minutes|hours) ago|\d+ 分前|\d+ 秒前'   # 生成 AI の答えの下の時刻
+#  - pattern: "premium requests?|AI credits?|クレジット"            # 答えの下の使用量
+# アバターは画像なので OCR では見つからない。fixed_boxes で塗る（撮るときのページの拡大ごとに位置を測る）
+
 # 2) ラベルの右にある値を塗る（管理画面が自分でぼかしただけの ID も塗る）
 label_value:
   - pattern: 'サブスクリプション\s*ID|Subscription\s*ID'
@@ -30,6 +40,7 @@ label_value:
 fixed_boxes:
   - box: [<x0>, <y0>, <x1>, <y1>]
     except: "^S9"           # 例: 端末の画面を S9NN として置く運用なら、その枚は外す
+# except を書き誤ると、当たるはずの枚に当たらずアバターが残った。塗った後に、全枚で当たったかを数えて確かめる
 
 # 4) GUID の部分だけを塗る。語りで触れる GUID（リソースに振られた識別子など）は keep に書いて残す
 guid:

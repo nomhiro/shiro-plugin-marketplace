@@ -16,8 +16,8 @@ SKILLS = PLUGIN / "skills"
 AGENTS = PLUGIN / "agents"
 SCRIPTS = PLUGIN / "scripts"
 
-VERSION = "0.4.0"
-MARKETPLACE_VERSION = "0.8.1"
+VERSION = "0.5.0"
+MARKETPLACE_VERSION = "0.8.2"
 
 EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen", "publish-video-course"}
 EXPECTED_AGENTS = {"transcript-reviewer"}
