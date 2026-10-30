@@ -16,11 +16,12 @@ SKILLS = PLUGIN / "skills"
 AGENTS = PLUGIN / "agents"
 SCRIPTS = PLUGIN / "scripts"
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 MARKETPLACE_VERSION = "0.8.2"
 
-EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen", "publish-video-course"}
-EXPECTED_AGENTS = {"transcript-reviewer"}
+EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen", "publish-video-course",
+                   "make-slide-lecture"}
+EXPECTED_AGENTS = {"transcript-reviewer", "slide-reviewer"}
 EXPECTED_SCRIPTS = {
     "lecture_movie.py", "practice_movie.py",
     "build_rec.py", "redact.py", "stage_diagram.py",
@@ -30,11 +31,19 @@ EXPECTED_SCRIPTS = {
     "empty_frames.py", "still_report.py", "final_sweep.py", "cue_report.py", "cue_drift.py",
     "ocr_mask.py", "leak_check_ocr.py", "ingest_shot.py",
     "check_clicks.py", "hira_check.py", "hira_narrow.py", "udemy_file_server.py", "udemy_quiz_payload.py",
+    # Hyperframes のスライド型（make-slide-lecture）
+    "course_config.py", "slide_kit.py", "make_unit.py", "make_bridge.py", "make_lecture.py", "new_storyboard.py",
+    "tts.py", "pad_audio.py", "word_times.py", "make_beats.py", "dump_beats.py", "check_reading.py", "redo_until.py",
+    "check_coverage.py", "check_idle.py", "check_late_reveals.py", "check_nth.py", "check_spacing.py", "check_crossfade.py",
+    "check_quiz_words.py", "landings.py", "shot_times.py", "sheet.py", "slide_table.py", "set_lines.py", "set_script_lines.py",
+    "lecture_script_view.py", "make_srt.py", "srt_to_vtt.py", "unit_build.py", "render_units.py", "render_status.py",
 }
 EXPECTED_REFERENCES = {"tts-readings.md", "quality-standards.md", "self-improvement.md",
-                       "quiz-authoring.md", "windows-and-ops.md", "japanese-check.md", "product-status.md"}
+                       "quiz-authoring.md", "windows-and-ops.md", "japanese-check.md", "product-status.md",
+                       "slide-format.md", "unit-playbook.md", "production-checklist.md"}
 EXPECTED_TEMPLATES = {"reshoot_prompt.md", "course-lessons.md", "leak_rules.example.yaml", "script-review_prompt.md",
-                      "fact-check_prompt.md", "quiz-review_prompt.md", "udemy_quiz_helpers.js"}
+                      "fact-check_prompt.md", "quiz-review_prompt.md", "udemy_quiz_helpers.js",
+                      "course.example.yaml", "slide_parts.example.py", "slide-reviewer-extra.md", "slide-unit"}
 # 特定の講座に固定されている痕跡が残っていたら退行
 FORBIDDEN = ("AI-103", "Foundry", "GitHub Copilot 講座", "成果物規約.md", "カリキュラム設計書.md")
 # 特定の講座・個人の環境の痕跡。スキルだけでなく、スクリプト・リファレンス・テンプレートの全部で禁止

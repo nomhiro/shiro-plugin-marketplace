@@ -30,6 +30,7 @@ GROUPS: dict[str, tuple[tuple[str, ...], tuple[str, ...], str]] = {
     "qa": (("numpy",), ("ffmpeg", "ffprobe"), "完成動画の検査"),
     "ocr": (("rapidocr_onnxruntime", "cv2", "numpy", "PIL", "yaml"), (), "OCR による黒塗りと塗り残しの点検"),
     "image": (("PIL", "numpy"), (), "フレームの加工"),
+    "slide": (("fontTools", "PIL", "yaml"), ("node", "npx", "ffmpeg", "ffprobe"), "Hyperframes のスライド型（make-slide-lecture）"),
 }
 # 段階2（scenes.yaml と cue の同期）を入れたら "sync": (("faster_whisper",), ...) をここに足し、
 # cue があるのに無ければ止める（--no-timing を明示したときだけ飛ばす）。

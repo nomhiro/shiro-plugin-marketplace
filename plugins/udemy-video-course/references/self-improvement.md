@@ -39,7 +39,7 @@
 | 台本・小テストの事実の言いすぎ・ずれ（初学者役も slide-reviewer も一次資料を見ない） | 事実の照合（`templates/fact-check_prompt.md`） | 音声を作る前。言いすぎ・ずれ・根拠なし 0 | 講座の事実の正本 |
 | 考えてみよう・小テストが形で解ける（4本中4本で再発） | 選択肢の表（`script-review_prompt.md`）・`quiz-review_prompt.md`・語の検査 | 台本のレビューと、軸を替えた後 | `quiz-authoring.md` |
 | AI の不自然な日本語（文末のコロン・主述のずれ） | `yomiyasu` のリンターと差分の点検 | 音声の前・制作者に見せる前 | `japanese-check.md` |
-| レンダリングの状態を誤報する（止められた後に「未レンダリング」） | 出力の実物を数える道具（講座側の `render_status.sh` など） | 報告の前に必ず | `windows-and-ops.md` |
+| レンダリングの状態を誤報する（止められた後に「未レンダリング」） | 出力の実物を数える道具（`render_status.py`） | 報告の前に必ず | `windows-and-ops.md` |
 | 審査の差し戻し（説明が旧版・AI の開示が無い・ボーナス レクチャーの講義名） | 審査前の最終点検（`publish-video-course` §7） | 審査に出す前 | `publish-video-course` |
 
 ### 実践

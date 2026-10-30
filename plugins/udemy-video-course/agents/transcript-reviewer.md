@@ -34,7 +34,7 @@ model: opus
 6. その製品の一次ドキュメントを引く手段（ドキュメント検索ツールがあればそれを使う）
 7. 講座の方針（出どころを言うか・選択肢の番号の書き方・講義名の印など）
 
-Hyperframes のスライド型（スキル `make-slide-lecture`。次の版で追加）では、台本は `videos/<unit>/SCRIPT.md` の字下げ行、
+Hyperframes のスライド型（[[make-slide-lecture]]）では、台本は `videos/<unit>/SCRIPT.md` の字下げ行、
 フレームは `snapshots/` の着地の絵とコンタクトシート、画面は塗り済みの `masked/` の画像。
 `## Line N — … (Frame N)` の Line と Frame が区間の対応になる。
 
