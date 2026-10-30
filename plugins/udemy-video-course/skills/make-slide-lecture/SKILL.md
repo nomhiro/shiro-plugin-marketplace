@@ -5,7 +5,7 @@ description: Hyperframes のスライド型（白い地・大きな文字・フ�
 
 # make-slide-lecture
 
-1ユニット＝1本の動画（2〜5分）を `videos/<unit>/` に作り、冒頭（`lecture-<章>-<レク>-open`）・本体のユニット・末尾（`-close`）を
+1ユニット＝1本の動画（尺の目安は `references/slide-format.md` §2d）を `videos/<unit>/` に作り、冒頭（`lecture-<章>-<レク>-open`）・本体のユニット・末尾（`-close`）を
 連結して、Udemy の講義1本（`<lectures_out_dir>/<lecture-id>/lecture.mp4`）にする。
 
 - 型の規則は `references/slide-format.md`、1ユニットの細かい手順は `references/unit-playbook.md`、関門の一覧は `references/production-checklist.md`

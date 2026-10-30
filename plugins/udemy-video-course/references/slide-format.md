@@ -4,7 +4,7 @@ Hyperframes で1枚ずつ絵を描き、語りに合わせて要素を出す座�
 実践（ハンズオン）の本体も同じ型で組める（§9）。
 
 - 部品と規則の強制は `slide_kit.py`。ユニットの手順は `unit-playbook.md`、関門の一覧は `production-checklist.md`
-- 台本・スライドの品質の基準（話の順に出す・箱は図だけ・固有名を言い換えない など）は `quality-standards.md`。ここは**型（画面・時間・ページの組み方）**を持つ
+- 台本・スライドの品質の基準（話の順に出す・箱は図だけ・固有名を言い換えない など）は `quality-standards.md`。ここは**型**（画面・時間・ページの組み方）を持つ
 - 色・書体・白地の正本は各ユニットの `frame.md`（雛形は `course.yaml` の template_dir）。動きと間の正本はこの文書
 - 講座が別の型の文書を使うときは `course.yaml` の slide_format_doc に書く（`make_unit.py` が BRIEF に書き込む）
 - **型を変えるときは、この文書・`slide_kit.py`・講座の規約・`frame.md` を同時に直す。** 1か所にしか書かないと、次のユニットで動きが戻る
