@@ -8,7 +8,11 @@ allowed-tools: Read, Write, Glob, Bash
 
 台本（`lectures/<NN_section>/<basename>_transcript.md`）と PowerPoint スライド（`<basename>.pptx`）から、AI音声付きの講座動画 `<basename>.mp4` を生成するスキル。
 
-> **位置づけ**：[[make-lecture-slides]] の**下流**。`make-lecture-slides` が作る `.pptx` と `_transcript.md` を入力に、ナレーションを合成して動画化する。1レクチャー＝1デック＝1台本（basename 共通）。
+> **位置づけ**：スライド（`.pptx`）と台本（`_transcript.md`）の**下流**。1レクチャー＝1デック＝1台本（basename 共通）。
+> 上流の `write-lecture-doc`（解説ドキュメント）・`make-lecture-slides`（pptx と台本）は**プラグインに入っていない**。講座側に用意するか、pptx と台本を手で作る。
+>
+> **新しい講座では、Hyperframes のスライド型（スキル `make-slide-lecture`（次の版で追加。今は講座側の tools/ で組む））を先に検討する。** 図解を語りに合わせて出せ、検査の道具と slide-reviewer がそろっている。
+> pptx の型は、制作者から受けた指摘（教材感・空の箱・切り替えの多さ）への対処が入っていない旧経路として残す。
 >
 > **由来**：Marp ベースの先行実装を土台に、入力スライドを **Marp md → PowerPoint(.pptx)** に、レクチャー単位を **ページ分割 → basename ペア解決**に移植したもの。TTS・「間」・ffmpeg 合成のコアは流用。
 
@@ -22,7 +26,8 @@ allowed-tools: Read, Write, Glob, Bash
 4. **LibreOffice(soffice)** で pptx → PDF → PNG（PyMuPDF）にレンダリング。
 5. ffmpeg で「スライド画像＋音声」をレクチャー単位の MP4 に合成。
 
-> 🔴 **音声を作ったら、動画を組む前に `scripts/verify_tts.py <…_transcript.md> --endpoint <Speech>` で照合する。**
+> 🔴 **音声を作ったら、動画を組む前に `scripts/verify_tts.py <…_transcript.md>` で照合する。**
+> 照合先は Azure（`--endpoint <Speech>`）か Google（`--backend google`。Gemini-TTS と同じ GCP プロジェクトで完結する）。
 > Gemini-TTS は、台本と無関係な文・**スタイル指示の読み上げ**・冒頭や末尾の脱落を起こす。
 > 実測（座学76本）：**23本・33区間**で発生し、公開済みの動画に埋もれていた。
 > 最多はスタイル指示の読み上げ（17区間）で、チャンクの切れ目に出やすい。再合成しても繰り返す区間は、
@@ -37,11 +42,12 @@ allowed-tools: Read, Write, Glob, Bash
 
 | いつ | 検査 | 合格 |
 |---|---|---|
-| 音声を作る前 | 初学者役のレビュー（用語の説明・話と絵のずれ・見た目だけの図・固有名の言い換え）と、台本の `受講者\|受講生\|講師` の grep | 指摘を直した。grep 0 件 |
+| 音声を作る前 | 初学者役のレビュー（用語の説明・話と絵のずれ・見た目だけの図・固有名の言い換え。依頼文は `templates/script-review_prompt.md`）と、台本の `受講者\|受講生\|講師` の grep | 指摘を直した。grep 0 件 |
 | 起動時（自動） | `deps.py`（工程に要る依存と、どの Python で動いているか） | 足りなければ終了コード 2 で止まる |
 | 音声の前（自動） | manifest（本文・モデル・声） | 本文が変わった区間だけ作り直す。モデル・声が既存と違えば何も作らずに止まる |
 | 音声の後 | `lecture_movie.py` の終了コード | 0（TTS の失敗があれば 1。動画は組まれない） |
-| 音声の後 | `verify_tts.py <台本> --endpoint <Speech>` を全区間 | NG 0。終了コード 3 は照合先の故障（音声を作り直さない） |
+| 音声の後 | `verify_tts.py <台本> --endpoint <Speech>`（または `--backend google`）を全区間 | NG 0。終了コード 3 は照合先の故障（音声を作り直さない）。同じ区間の NG が作り直しで変わらなければ、`hira_check.py` で音を確かめる（STT の癖のことがある） |
+| 音声の後 | `check_clicks.py <音声フォルダ>/*.wav`（合成の応答を自前でつなぐ経路・モデルを足したとき） | 0 件（ヘッダの連結によるクリック） |
 | 動画の前（自動） | 音声が無い・古い・モデルが混在する区間 | 0（あれば終了コード 1 で止まる） |
 | 完成後 | スライドの PNG・完成動画のシートを全数目視 | 抜き取りで見ない |
 | 完成後 | `empty_frames.py <mp4>` | 見出しだけの区間 0 |
@@ -103,7 +109,10 @@ python scripts/lecture_movie.py L1-1-x
 |---|---|---|
 | `targets`（必須・複数可） | — | レクチャーID（`L1-1-2`）/グロブ（`L1-1-x`）/ `.pptx`・`*_transcript.md` のパス |
 | `--lectures-dir <path>` | `lectures` | 検索ルート |
-| `--include-practice` | off | 実践（ハンズオン）も生成する（既定は実践をスキップ＝自分の声で収録するため） |
+| `--include-practice` | off | 実践（ハンズオン）も生成する（既定は実践をスキップ＝実践は録画を軸に別の経路で組むため） |
+| `--style` | off | 指示ファイルの最初の `---` より前を演技指示として TTS に渡す（既定は渡さない。`tts-readings.md` C6） |
+| `--readings` | `<repo>/tts-readings.tsv` | 読みの辞書（`表記<TAB>読み`）。TTS に渡す文だけに当てる。無ければ使わない |
+| `--no-backup` | off | 作った音声を `<repo>/_audio-backup/<日付>/<basename>/` に退避しない（既定は退避する。講座の `.gitignore` に `_audio-backup/` を入れる） |
 | `--audio-only` / `--video-only` | 両方 | フェーズを限定 |
 | `--model <名>` | 環境変数 `VIDEO_COURSE_TTS_MODEL`、無ければ `gemini-3.1-flash-tts-preview` | TTSモデル。**既存の音声と違うモデルなら止まる**（1本の中で混ぜない） |
 | `--voice <名>` | 指示ファイルの Voice（`Callirrhoe`） | 読み上げ音声 |
@@ -156,7 +165,15 @@ lectures/<NN_section>/
 
 ## 声・スタイル
 
-`<repo>/vertexai-tts-instruction.md` で制御する。`Voice：<名>`（既定 `Callirrhoe`）の行と、それ以降の `DIRECTOR'S NOTES`（スタイル指示プロンプト）を読み込む。声やトーンを変えたいときはこのファイルを編集する。
+`<repo>/vertexai-tts-instruction.md`（`--instruction` で別の名前も可。座学と実践で同じファイルを使う）で制御する。
+`Voice：<名>`（既定 `Callirrhoe`）の行から声を取る。
+
+**演技指示（スタイル指示プロンプト）は既定で渡さない。** 新しい世代の TTS は、演技指示との組で正当な台詞を content filter で
+決定的に拒否し、通る行と落ちる行が演技指示の1文字で入れ替わる（`tts-readings.md` C6）。間は台本の読点・文の分割と、行の前後の無音で作る。
+渡すときは `--style` を付ける。そのとき渡すのは**最初の `---` の行より前だけ**で、`---` の後ろは運用メモとして TTS に渡さない
+（以前は `---` の行だけを消していたので、運用メモまで演技指示として渡していた）。
+
+誤読する語は、台本を変えずに読みの辞書（`<repo>/tts-readings.tsv`）で直す。辞書でも直らない語は台本を言い換える。
 
 ## よくある落とし穴
 
@@ -186,3 +203,4 @@ lectures/<NN_section>/
 - 上流：[[make-lecture-slides]]（pptx と `_transcript.md` を作る）／[[write-lecture-doc]]（詳細原本）
 - 規約：講座リポジトリの用語規約・テンプレート／設計：カリキュラム設計書
 - 姉妹：[[make-practice-movie]]（実践レクチャーの動画化）
+- 下流：[[publish-video-course]]（Udemy の動画講座に載せる。動画のアップロード・小テスト・改名）

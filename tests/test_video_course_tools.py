@@ -21,6 +21,31 @@ def test_all_empty_means_the_endpoint_is_broken():
     assert not all_empty([{"recognized": ""}])          # 1区間だけでは判断しない
 
 
+def test_backend_is_explicit_first_then_endpoint():
+    """照合先は 引数 → 環境変数 → エンドポイントの有無。`--endpoint` だけの既存の呼び方は Azure のまま。"""
+    from verify_tts import pick_backend
+    assert pick_backend(None, None, "https://x.cognitiveservices.azure.com/") == "azure"
+    assert pick_backend(None, None, None) == "google"
+    assert pick_backend(None, "google", "https://x/") == "google"
+    assert pick_backend("azure", "google", None) == "azure"
+    with pytest.raises(ValueError):
+        pick_backend("whisper", None, None)
+
+
+def test_long_audio_is_cut_in_the_quiet_part_within_the_limit():
+    """Google はインラインの音声が 1 分まで。55 秒以内に、無音の所で切る（語の途中で切らない）。"""
+    from verify_tts import cut_points
+    rate = 100                                    # 1 秒 = 100 サンプルの模型
+    s = [1000] * (rate * 130)
+    s[rate * 48:rate * 49] = [0] * rate           # 48 秒目に1秒の無音
+    s[rate * 95:rate * 96] = [0] * rate           # 95 秒目に1秒の無音
+    pts = cut_points(s, rate, frame_ms=100)
+    assert pts[0] == 0 and pts[-1] == len(s)
+    assert all(b - a <= 55 * rate for a, b in zip(pts, pts[1:]))
+    assert 48 * rate <= pts[1] < 49 * rate and 95 * rate <= pts[2] < 96 * rate
+    assert cut_points([0] * (rate * 30), rate) == [0, rate * 30]   # 短ければ切らない
+
+
 # ---------------------------------------------------------------- audio_manifest
 def _mf(text, model="m1", voice="v1"):
     from audio_manifest import make_entry
@@ -368,3 +393,215 @@ def test_practice_legacy_manifest_stops_until_adopted(monkeypatch, tmp_path):
     assert _run_practice(monkeypatch, t, ["--model", "m1"], _writer(calls)) == 0   # 記録したので通る
     assert _run_practice(monkeypatch, t, ["--model", "m2"], _writer(calls)) == 1   # 別のモデルは止まる
     assert calls == []
+
+
+# ---------------------------------------------------------------- check_clicks
+def test_embedded_wav_header_is_a_click():
+    """ヘッダ付きの WAV をそのまま連結すると、44 バイトがサンプルとして鳴る。"""
+    import struct
+    from check_clicks import data_offset, head_problems
+    hdr = b"RIFF" + struct.pack("<I", 36 + 400) + b"WAVE" + b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16) \
+        + b"data" + struct.pack("<I", 400)
+    assert data_offset(hdr + bytes(400)) == 44
+    assert head_problems("x.wav", hdr + bytes(400))
+    assert not head_problems("x.wav", bytes(44) + bytes(400))          # ゼロで埋めた形は通る
+
+
+def test_click_is_found_only_at_the_clip_start():
+    from check_clicks import peaks_at
+    s = [0] * 48000
+    s[24000] = 20000                                                    # 0.5 秒にクリック
+    got = dict(peaks_at(s, [0.5, 0.8]))
+    assert got[0.5] == 20000 and got[0.8] == 0
+
+
+# ---------------------------------------------------------------- hira_check
+def test_hira_windows_overlap_and_reach_the_end():
+    from hira_check import windows
+    w = windows(20.0)
+    assert w[0] == (0.0, 9.0) and w[-1][1] == 20.0
+    assert all(b > c for (_, b), (c, _) in zip(w, w[1:]))              # 隣の窓と重なる
+    assert windows(5.0) == [(0.0, 5.0)]
+
+
+def test_hira_narrow_passes_unless_the_wrong_reading_is_the_majority():
+    """疑う読みが半分以下なら通す（STT の揺れで録り直さない）。"""
+    from hira_narrow import count_readings, suspicious
+    c = count_readings(["しゅちょう する", "しちょうする", "しゅちょうを", "べつの"], ["しゅちょう", "しちょう"])
+    assert c == {"しゅちょう": 2, "しちょう": 1}
+    assert not suspicious(c, "しゅちょう")
+    assert suspicious({"しゅちょう": 1, "しちょう": 2}, "しゅちょう")
+    assert not suspicious({"しゅちょう": 1, "しちょう": 1}, "しゅちょう")   # 同数は通す
+    assert not suspicious({"しゅちょう": 0, "しちょう": 0}, "しゅちょう")
+
+
+# ---------------------------------------------------------------- udemy_quiz_payload
+def test_quiz_payload_shape():
+    import json
+    from udemy_quiz_payload import body, problems
+    q = {"id": "Q1", "question": "次のうち正しいものは？\n- ア **A**\n- イ B", "options": ["ア", "イ", "両方"],
+         "correct": 1, "explanation": "イが正しい。"}
+    assert not problems(q)
+    b = body(q)
+    assert b["assessment_type"] == "multiple-choice"
+    assert json.loads(b["correct_response"]) == ["b"]
+    assert "<ul>" in b["question"] and "**" not in b["question"]
+    fb = json.loads(b["feedbacks"])
+    assert fb[1].startswith("<p>正解です。</p>") and fb[0].startswith("<p>不正解です。</p>")
+    assert len(json.loads(b["answers"])) == 3
+
+
+def test_quiz_payload_rejects_broken_questions():
+    from udemy_quiz_payload import problems
+    assert problems({"question": "q", "options": ["a"], "correct": 0, "explanation": "e"})
+    assert problems({"question": "q", "options": ["a", "b"], "correct": 2, "explanation": "e"})
+    assert problems({"question": "q", "options": ["a", "b"], "correct": 0, "explanation": ""})
+
+
+# ---------------------------------------------------------------- udemy_file_server
+def test_file_server_serves_only_inside_the_root(tmp_path):
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from udemy_file_server import make_handler
+    (tmp_path / "01").mkdir()
+    (tmp_path / "01" / "002_b.mp4").write_bytes(b"BB")
+    (tmp_path / "01" / "001_a.mp4").write_bytes(b"A")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        import json
+        lst = json.loads(urllib.request.urlopen(base + "/list/01").read())
+        assert [x["name"] for x in lst] == ["001_a.mp4", "002_b.mp4"]   # 名前の昇順＝講義の順
+        r = urllib.request.urlopen(base + "/f/01/2")
+        assert r.read() == b"BB" and r.headers["Access-Control-Allow-Private-Network"] == "true"
+        with pytest.raises(Exception):
+            urllib.request.urlopen(base + "/f/01/..%2f..%2fsecret")
+    finally:
+        srv.shutdown()
+
+
+def test_file_server_accepts_a_second_lecture_folder(tmp_path):
+    """同じ章の2本目のレクチャーは 08b のように置く（GH-300）。"""
+    import json
+    import threading
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+    from udemy_file_server import make_handler
+    (tmp_path / "08b").mkdir()
+    (tmp_path / "08b" / "01_x.mp4").write_bytes(b"X")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(tmp_path))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        assert [x["name"] for x in json.loads(urllib.request.urlopen(base + "/list/08b").read())] == ["01_x.mp4"]
+        assert urllib.request.urlopen(base + "/f/08b/1").read() == b"X"
+    finally:
+        srv.shutdown()
+
+
+# ---------------------------------------------------------------- udemy_quiz_payload（原稿から）
+QUIZ_MD = """# [L1-1] 小テスト（原稿）
+
+> 作り方のメモ。Udemy には入れない
+
+## 作り方の約束
+
+- 軸の表など
+
+## 問題
+
+### Q1
+
+あなたは、`git` を使っています。正しいものはどれですか？
+
+- A. **太字**の選択肢
+- B. 正しい選択肢 ← **正解**
+- C. ほかの選択肢
+- D. 最後の選択肢
+
+**解説**：Bは正しい。Aは、`x` なので誤りです。
+
+### Q2
+
+二つ目の問いです。
+
+- A. ア ← **正解**
+- B. イ
+
+**解説**：アが正しい。
+
+## 保留案
+
+### Q1
+
+重なって入ってはいけない問い
+
+- A. a ← **正解**
+- B. b
+
+**解説**：保留。
+"""
+
+
+def test_quiz_markdown_reads_only_the_question_section():
+    """「## 問題」の節だけを読む（後ろの「保留案」まで読むと、同じ番号の問いが重なって入った）。"""
+    from udemy_quiz_payload import parse_md, problems
+    qz = parse_md(QUIZ_MD, slug="L1-1_quiz")
+    qs = qz["questions"]
+    assert [q["id"] for q in qs] == ["L1-1_quiz-Q1", "L1-1_quiz-Q2"]
+    assert qs[0]["correct"] == 1 and len(qs[0]["options"]) == 4
+    assert qs[0]["question"].startswith("あなたは")
+    assert qs[1]["correct"] == 0
+    assert not any(problems(q) for q in qs)
+
+
+def test_quiz_for_screen_input_drops_markup_but_keeps_words():
+    """画面の入力欄は書式なし。** とバッククォートの記号を外し、中の語は残す。"""
+    from udemy_quiz_payload import parse_md, to_qs
+    q = to_qs(parse_md(QUIZ_MD, slug="s")["questions"][0])
+    assert q["a"] == 1
+    assert q["s"] == "あなたは、git を使っています。正しいものはどれですか？"
+    assert q["o"][0] == "太字の選択肢"
+    assert "`" not in q["e"] and "**" not in q["e"] and "x" in q["e"]
+
+
+# ---------------------------------------------------------------- 音声（指示ファイル・読みの辞書・退避）
+def test_style_prompt_is_off_by_default_and_stops_at_the_rule(tmp_path):
+    """演技指示は既定で渡さない。渡すときも、最初の --- より前だけ（後ろの運用メモを TTS に渡していた）。"""
+    from lecture_movie import load_voice_and_style
+    p = tmp_path / "tts-instruction.md"
+    p.write_text("Voice: Callirrhoe\n落ち着いた声で話す。\n---\n運用メモ: 演技指示は使わない\n", encoding="utf-8")
+    assert load_voice_and_style(p, "Kore") == ("Callirrhoe", "")
+    voice, style = load_voice_and_style(p, "Kore", use_style=True)
+    assert voice == "Callirrhoe" and style == "落ち着いた声で話す。"
+    assert "運用メモ" not in style
+    assert load_voice_and_style(tmp_path / "none.md", "Kore") == ("Kore", "")
+
+
+def test_readings_replace_longer_words_first(tmp_path):
+    from lecture_movie import apply_readings, load_readings
+    p = tmp_path / "tts-readings.tsv"
+    p.write_text("# 表記\t読み\nEsc\tエスク\nEscキー\tエスケープキー  # 2026-10-19 F10 で「えすくきー」\n"
+                 "pytest → パイテスト\n", encoding="utf-8")
+    r = load_readings(p)
+    assert apply_readings("Escキーを押し、pytestを回す。Escだけ。", r) == "エスケープキーを押し、パイテストを回す。エスクだけ。"
+    assert load_readings(tmp_path / "none.tsv") == []
+    p.write_text("読めない行\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_readings(p)
+
+
+def test_made_audio_is_backed_up_without_overwriting(tmp_path):
+    from lecture_movie import backup_audio
+    a = tmp_path / "audio"
+    a.mkdir()
+    (a / "speech_01.wav").write_bytes(b"1")
+    (a / "speech_02.wav").write_bytes(b"2")
+    (a / ".manifest.json").write_text("{}", encoding="utf-8")
+    d1 = backup_audio(a, ["speech_01.wav"], tmp_path / "bk", "L1-1")
+    d2 = backup_audio(a, ["speech_02.wav"], tmp_path / "bk", "L1-1")
+    assert d1 != d2 and d2.name == "L1-1-2"
+    assert sorted(x.name for x in d1.iterdir()) == [".manifest.json", "speech_01.wav"]
+    assert backup_audio(a, [], tmp_path / "bk", "L1-1") is None

@@ -6,9 +6,9 @@ PLUGIN = REPO / "plugins" / "udemy-exam-prep"
 
 # このプラグインのリリース版。marketplace.json の該当エントリと plugin.json の
 # 両方に同じ値が入っていることを検証する（片方だけ上げる事故を落とす）。
-VERSION = "0.8.0"
+VERSION = "0.8.2"
 # マーケットプレイス自体の版。プラグインを足したら上げる
-MARKETPLACE_VERSION = "0.8.0"
+MARKETPLACE_VERSION = "0.8.2"
 
 
 def _load(p):

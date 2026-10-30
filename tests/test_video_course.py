@@ -16,10 +16,10 @@ SKILLS = PLUGIN / "skills"
 AGENTS = PLUGIN / "agents"
 SCRIPTS = PLUGIN / "scripts"
 
-VERSION = "0.3.0"
-MARKETPLACE_VERSION = "0.8.0"
+VERSION = "0.5.0"
+MARKETPLACE_VERSION = "0.8.2"
 
-EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen"}
+EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen", "publish-video-course"}
 EXPECTED_AGENTS = {"transcript-reviewer"}
 EXPECTED_SCRIPTS = {
     "lecture_movie.py", "practice_movie.py",
@@ -29,14 +29,19 @@ EXPECTED_SCRIPTS = {
     "audio_manifest.py", "deps.py", "verify_tts.py",
     "empty_frames.py", "still_report.py", "final_sweep.py", "cue_report.py", "cue_drift.py",
     "ocr_mask.py", "leak_check_ocr.py", "ingest_shot.py",
+    "check_clicks.py", "hira_check.py", "hira_narrow.py", "udemy_file_server.py", "udemy_quiz_payload.py",
 }
-EXPECTED_REFERENCES = {"tts-readings.md", "quality-standards.md", "self-improvement.md"}
-EXPECTED_TEMPLATES = {"reshoot_prompt.md", "course-lessons.md", "leak_rules.example.yaml"}
+EXPECTED_REFERENCES = {"tts-readings.md", "quality-standards.md", "self-improvement.md",
+                       "quiz-authoring.md", "windows-and-ops.md", "japanese-check.md", "product-status.md"}
+EXPECTED_TEMPLATES = {"reshoot_prompt.md", "course-lessons.md", "leak_rules.example.yaml", "script-review_prompt.md",
+                      "fact-check_prompt.md", "quiz-review_prompt.md", "udemy_quiz_helpers.js"}
 # 特定の講座に固定されている痕跡が残っていたら退行
 FORBIDDEN = ("AI-103", "Foundry", "GitHub Copilot 講座", "成果物規約.md", "カリキュラム設計書.md")
 # 特定の講座・個人の環境の痕跡。スキルだけでなく、スクリプト・リファレンス・テンプレートの全部で禁止
 # （クラウドのリソース名やキーの名前は、ここに書くこと自体が公開になるので載せない。PR の前に手で検索する）
-COURSE_TOKENS = ("AZ-700", "az700", "7334843", "C:/Python313", r"C:\Python313", "zoomfix")
+COURSE_TOKENS = ("AZ-700", "az700", "7334843", "C:/Python313", r"C:\Python313", "zoomfix",
+                 "G検定", "G-KENTEI", "7377783", "JDLA",
+                 "GH-300", "6966727", "AI-103", "7236657")
 
 
 def _load(p):

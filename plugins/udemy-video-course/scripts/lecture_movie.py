@@ -283,6 +283,8 @@ def _tts_call(client, chunk: str, prompt: str, voice: str, model: str,
             language_code=language_code, name=voice, model_name=model),
         audio_config=texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.LINEAR16),
+        # 応答が返らず無期限に止まることがあった（2026-10-23/24）。超えたら DeadlineExceeded で再試行に回す
+        timeout=180,
     )
     return resp.audio_content
 
@@ -351,16 +353,74 @@ def synthesize_speech_file(text: str, style_prompt: str, voice: str, model: str,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def load_voice_and_style(instruction_path: Path, default_voice: str) -> tuple[str, str]:
-    """vertexai-tts-instruction.md から声名とスタイルプロンプトを抽出する。"""
+def load_voice_and_style(instruction_path: Path, default_voice: str,
+                         use_style: bool = False) -> tuple[str, str]:
+    """指示ファイルから声名と演技指示（スタイルプロンプト）を取り出す。
+
+    - 声名は `Voice: Callirrhoe` の行から取る（ファイルのどこにあってもよい）
+    - 演技指示は、最初の `---` の行より前だけ。後ろは運用メモとして TTS に渡さない
+      （以前は `---` の行だけを消していたので、運用メモまで演技指示として渡していた）
+    - 演技指示は既定で使わない（use_style=False）。content filter が正当な台詞を
+      決定的に拒否し、一部の行だけに指示が乗ると声がそろわないため（tts-readings C6）
+    """
     if not instruction_path.exists():
         return default_voice, ""
     text = instruction_path.read_text(encoding="utf-8")
     vm = re.search(r"Voice\s*[：:]\s*([A-Za-z]+)", text)
     voice = vm.group(1) if vm else default_voice
-    style = re.sub(r"(?m)^\s*Voice\s*[：:].*$", "", text)
-    style = re.sub(r"(?m)^\s*---\s*$", "", style).strip()
+    if not use_style:
+        return voice, ""
+    head = re.split(r"(?m)^\s*---\s*$", text, maxsplit=1)[0]
+    style = re.sub(r"(?m)^\s*Voice\s*[：:].*$", "", head).strip()
     return voice, style
+
+
+def load_readings(path: Path | None) -> list[tuple[str, str]]:
+    """講座の読みの辞書を読む。台本の表記 → TTS に渡す読み（画面・字幕は台本の表記のまま）。
+
+    1行1語。`表記<TAB>読み` か `表記 → 読み`。`#` から後ろはコメント（誤読した日・行・何回中何回直ったかを書く）。
+    長い表記から先に置き換える（「Escキー」と「Esc」の両方があるとき、短い方が先に当たらないように）。
+    """
+    if not path or not path.exists():
+        return []
+    pairs: list[tuple[str, str]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        parts = line.split("\t") if "\t" in line else line.split("→")
+        if len(parts) != 2:
+            raise ValueError(f"読みの辞書の行が読めない（表記<TAB>読み か 表記 → 読み）: {raw!r}")
+        src, dst = parts[0].strip(), parts[1].strip()
+        if src and dst:
+            pairs.append((src, dst))
+    return sorted(pairs, key=lambda p: -len(p[0]))
+
+
+def apply_readings(text: str, readings: list[tuple[str, str]]) -> str:
+    for src, dst in readings:
+        text = text.replace(src, dst)
+    return text
+
+
+def backup_audio(audio_dir: Path, names: list[str], backup_root: Path, label: str) -> Path | None:
+    """作った直後の音声を退避する（Gemini-TTS は非決定的で、同じ音声は二度と作れない）。
+
+    `<backup_root>/<日付>/<label>/` に、作った wav と manifest を写す。同じ日に2回目なら `-2` を付けた別名にする。
+    """
+    import datetime
+    files = [audio_dir / n for n in names if (audio_dir / n).exists()]
+    if not files:
+        return None
+    base = backup_root / datetime.date.today().isoformat() / label
+    dest, i = base, 1
+    while dest.exists():
+        i += 1
+        dest = base.with_name(f"{base.name}-{i}")
+    dest.mkdir(parents=True)
+    for f in files + [p for p in [audio_dir / am.MANIFEST_NAME] if p.exists()]:
+        shutil.copy2(f, dest / f.name)
+    return dest
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +593,13 @@ def main() -> None:
                     help="声名（既定は指示ファイルのVoice、無ければ Callirrhoe）")
     ap.add_argument("--language-code", default="ja-JP")
     ap.add_argument("--instruction", default=None,
-                    help="スタイル指示ファイル（既定: <repo>/vertexai-tts-instruction.md）")
+                    help="声の指示ファイル（既定: <repo>/vertexai-tts-instruction.md）。声名は Voice の行から取る")
+    ap.add_argument("--style", action="store_true",
+                    help="指示ファイルの最初の --- より前を演技指示として TTS に渡す（既定は渡さない）")
+    ap.add_argument("--readings", default=None,
+                    help="読みの辞書（既定: <repo>/tts-readings.tsv。無ければ使わない）。表記<TAB>読み")
+    ap.add_argument("--no-backup", action="store_true",
+                    help="作った音声を <repo>/_audio-backup/<日付>/ に退避しない（既定は退避する）")
     ap.add_argument("--force", action="store_true", help="既存のwav/mp4も再生成")
     ap.add_argument("--allow-tts-failure", action="store_true",
                     help="TTS の失敗・音声の欠けがあっても無音の静止画で組んで終了コード 0 を返す（従来の動き）")
@@ -601,7 +667,8 @@ def main() -> None:
 
         instruction_path = Path(args.instruction) if args.instruction \
             else job.repo_root / "vertexai-tts-instruction.md"
-        voice, style_prompt = load_voice_and_style(instruction_path, default_voice=voice_default)
+        voice, style_prompt = load_voice_and_style(instruction_path, default_voice=voice_default,
+                                                   use_style=args.style)
         if args.voice:
             voice = args.voice
 
@@ -622,8 +689,12 @@ def main() -> None:
             failed: list[tuple[str, int, str]] = []
 
             # ---- 音声フェーズ ----
-            items = [(seg.speech_name, seg.text) for seg in segments if seg.text]
+            # 読みの辞書は TTS に渡す文だけに当てる。manifest も置き換えた後の文で持つ（辞書を直すと、その区間だけ作り直す）
+            readings = load_readings(Path(args.readings) if args.readings
+                                     else job.repo_root / "tts-readings.tsv")
+            items = [(seg.speech_name, apply_readings(seg.text, readings)) for seg in segments if seg.text]
             text_of = dict(items)
+            made: list[str] = []
             page_of = {seg.speech_name: seg.page_index for seg in segments if seg.speech_name}
             if do_audio:
                 print(f"▶ 音声生成 (model={args.model}, voice={voice})")
@@ -653,10 +724,14 @@ def main() -> None:
                             chunk_gap=args.chunk_gap_seconds)
                         manifest[key] = am.make_entry(text_of[key], args.model, voice)
                         am.save(job.audio_dir, manifest)
+                        made.append(key)
                     except Exception as e:  # 1セグメントの失敗で残りの合成は止めない
                         msg = str(e).splitlines()[0][:160]
                         print(f"    ! 失敗: {key}（スライド{page_of[key]}）: {msg}")
                         failed.append((key, page_of[key], msg))
+                if made and not args.no_backup:
+                    dest = backup_audio(job.audio_dir, made, job.repo_root / "_audio-backup", job.basename)
+                    print(f"  ⇒ 退避 {len(made)} 区間 → {dest}")
 
             # ---- 動画フェーズ ----
             if do_video and failed and not args.allow_tts_failure:
