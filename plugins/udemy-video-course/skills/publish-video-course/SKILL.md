@@ -264,7 +264,7 @@ await (await fetch(`/api-2.0/quizzes/<quiz_id>/assessments/?page_size=50&fields[
 
 ## 関連
 
-- 上流：`make-slide-lecture`（Hyperframes のスライド型。座学と実践の本体。次の版で追加）・`make-lecture-movie`／`make-practice-movie`（旧経路）
+- 上流：[[make-slide-lecture]]（Hyperframes のスライド型。座学と実践の本体）・`make-lecture-movie`／`make-practice-movie`（旧経路）
 - コースの基本情報・画像・長文の入れ方：`udemy-exam-prep` の `create-udemy-course`
 - 演習テスト（practice test）：`udemy-exam-prep` の `udemy-bulk-upload` / `upload-practice-tests`
 - 小テストの作り方：`references/quiz-authoring.md`。補助関数：`templates/udemy_quiz_helpers.js`

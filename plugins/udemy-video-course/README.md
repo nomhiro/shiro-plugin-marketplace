@@ -9,8 +9,10 @@
 ## 全体像
 
 ```
-[座学]   台本 + pptx ──────────────────────────► make-lecture-movie ──► mp4
-[実践]   録画 or 画面操作 ──► record-practice-screen ──► make-practice-movie ──► mp4
+[既定]   台本 ──► 音声・語末の実測 ──► slides.py ──► make-slide-lecture ──► 冒頭＋本体＋末尾 ──► mp4
+           （座学のユニット／実践の本体＝record-practice-screen の塗り済み静止画）   └─ slide-reviewer
+[旧型]   台本 + pptx ──────────────────────────► make-lecture-movie ──► mp4
+[旧型]   録画 or 画面操作 ──► record-practice-screen ──► make-practice-movie ──► mp4
                                     │                         │
                          cue_stills（強調を目視）              │
                                     ┌─────────────────────────┘
@@ -35,6 +37,7 @@ URL で直接飛ばない**。CLI で作って画面は結果を読むだけの�
 
 | スキル | 役割 |
 |---|---|
+| `make-slide-lecture` | **既定の作り方。** Hyperframes のスライド型（白い地・大きな文字・フェードと矢印だけ）で、座学のユニットと実践の本体を作り、冒頭・本体・末尾を1本の講義に連結する。講座の値は `course.yaml` |
 | `make-lecture-movie` | 台本＋pptx → AI音声付き動画。実践は既定でスキップする |
 | `make-practice-movie` | 録画＋スライド → 録画に同期した実践動画。区間の粒度・沈黙率・映り込みの作法を含む |
 | `record-practice-screen` | Claude が画面を操作して実践の素材（`_rec.mp4`）を撮る。塗りつぶしと強調まで |
@@ -59,12 +62,20 @@ URL で直接飛ばない**。CLI で作って画面は結果を読むだけの�
 | `templates/fact-check_prompt.md` | 事実の照合の依頼文。台本と小テストの事実を1文ずつ一次資料と突き合わせる |
 | `templates/quiz-review_prompt.md` | 小テストの確認レビューの依頼文。軸を替えた・作り直したときに通す |
 | `templates/udemy_quiz_helpers.js` | Udemy の小テストを画面の操作でまとめて入れる補助関数 |
+| `references/slide-format.md` | スライド型の規則（タイトルの常設・動きは2種類・表示は語の話し始め・切り替え・画面の大きさ・ハンズオンの本体の置き方） |
+| `references/unit-playbook.md` | 1ユニットの作り方の手順（台本 → 音声 → 語末 → slides.py → 検査）とコマンド |
+| `references/production-checklist.md` | 台本・音声・スライドの関門を1枚にまとめた点検表 |
+| `templates/course.example.yaml` | 講座の設定ファイル（受講者像・置き場所・章フォルダ・Hyperframes の版・話者・読みの辞書）。講座の直下に `course.yaml` として写す |
+| `templates/slide-unit/` | ユニットの雛形（`frame.md` の配色・`hyperframes.json`・`package.json`）。書体は講座が置く |
+| `templates/slide_parts.example.py` | 講座の slides.py が共通に使う部品（現在地・要点の行・考えてみよう・画面のキャプチャ）の雛形 |
+| `templates/slide-reviewer-extra.md` | slide-reviewer に足す講座だけの観点の雛形（講座の `.claude/slide-reviewer-extra.md`） |
 
 ## エージェント
 
 | エージェント | 役割 |
 |---|---|
 | `transcript-reviewer` | 台本を画面・一次ドキュメントと突き合わせる第三者レビュー。重大度つきの指摘表を出す |
+| `slide-reviewer` | スライド型のユニットを、着地のスナップショット・台本・slides.py と突き合わせる第三者レビュー（空の箱・説明の箱・タイトルの言い直し・遅すぎる表示・読み・画面の偏りなど）。講座の追加観点も読む |
 
 ## スクリプト
 
@@ -99,6 +110,16 @@ URL で直接飛ばない**。CLI で作って画面は結果を読むだけの�
 | `final_sweep.py` | 仕様・尺・音量（LUFS）・無音・黒・cue の補間を全本で1枚の表にする（ゲート） |
 | `cue_report.py` | cue（台本の一節で強調を出す同期）を使う講座で、音声との照合結果を分母つきで全数集計する（ゲート） |
 | `cue_drift.py` | 同上。matched のまま別の文に当たった cue（誤一致）を拾う（ゲート） |
+| `slide` 系（make-slide-lecture） | |
+| `course_config.py` | 講座の `course.yaml` を作業ディレクトリから上へ探して読む。無ければ既定値。`python course_config.py` で中身を出す |
+| `make_unit.py`・`make_bridge.py`・`new_storyboard.py` | ユニットの入れ物・ユニット間の区切りの札・STORYBOARD の器 |
+| `tts.py`・`pad_audio.py`・`check_reading.py`・`redo_until.py` | 音声（作った直後に退避）・行頭と行末の無音・STT での照合・読めるまで作り直す |
+| `word_times.py`・`make_beats.py`・`dump_beats.py` | 語末の実測時刻（slides.py の `E(frame, "語")` が引く） |
+| `slide_kit.py` | スライドの部品。タイトルの常設・動き2種類・表示の上限・はみ出しを、生成の時点で例外にする |
+| `unit_build.py`・`render_units.py`・`render_status.py` | 組んで検査（lint・check・継ぎ目・snapshot）・1本ずつのレンダリング・何が済んだかを数える |
+| `check_coverage.py`・`check_idle.py`・`check_late_reveals.py`・`check_nth.py`・`check_spacing.py`・`check_crossfade.py` | 画面の使い方・増えない時間・遅すぎる表示・同じ語の何回目・行送り・切り替えの窓 |
+| `check_quiz_words.py`・`landings.py`・`shot_times.py`・`sheet.py`・`slide_table.py` | 考えてみようの語・着地の時刻・snapshot の時刻・コンタクトシート・ユニット doc の表 |
+| `make_lecture.py`・`make_srt.py`・`srt_to_vtt.py`・`lecture_script_view.py`・`set_lines.py`・`set_script_lines.py` | 1本の講義に連結・字幕（手元の確認用）・台本の通し読み・台本の行の差し替え |
 | `Udemy` 系 | |
 | `udemy_file_server.py` | アップロードする動画を 127.0.0.1 だけで配る（Udemy のページ内スクリプトがファイルを選ぶため。`file_upload` の 10MB 上限を避ける） |
 | `udemy_quiz_payload.py` | 小テストの問題を、Udemy のクイズの API（assessments）に送る本文に変える。選択肢数・正解・解説を検証する |
@@ -134,6 +155,8 @@ pip install -r scripts/requirements.txt
 ```
 
 加えて、システム側に **ffmpeg / ffprobe**、**LibreOffice（soffice）** が要る。
+スライド型には **node / npx**（`npx hyperframes@<版>`）と **faceless-explainer のスキル**（`assemble-index.mjs`・`transitions.mjs`・`audio.mjs`）、
+書体 **BIZ UDPGothic**（npm の `@fontsource/biz-udpgothic`。SIL OFL）が要る。`python scripts/deps.py slide` で確かめる。
 段階図を作るなら **draw.io desktop**、音声合成にはクラウドTTSの認証が要る。
 
 ## 講座固有のもの
@@ -143,11 +166,27 @@ pip install -r scripts/requirements.txt
 
 - 映り込みの規則ファイル（`templates/leak_rules.example.yaml` から作る。**git 管理外**）
 - 制作の教訓ファイル（`templates/course-lessons.md` から作る。座学と実践で1つ）
+- スライド型の講座の設定 `course.yaml`・部品 `videos/_shared/<講座>_parts.py`・読みの辞書 `tts-readings.tsv`・slide-reviewer の追加観点
 - TTS モデルの既定（環境変数 `VIDEO_COURSE_TTS_MODEL`）、照合先（環境変数 `VERIFY_TTS_BACKEND`＝`azure`｜`google`、
   azure のエンドポイントは `SPEECH_ENDPOINT`、google と `hira_check.py` のプロジェクトは `GOOGLE_CLOUD_PROJECT`）。
   API キーなどの秘密情報はリポジトリの外に置き、画面・ログ・コミットに出さない
 
 ## 変更履歴
+
+### 0.6.0
+
+講座ごとに写して直していた Hyperframes のスライド型の工程を、プラグインに上げた（直しが片方の講座にしか入らなくなっていた）。
+
+- **スキル `make-slide-lecture`**：前提の確かめ方・講座の準備・1ユニットの流れ・ハンズオンの本体・1本の講義への連結・必ず回す検査
+- **道具 32本**：講座の値（受講者像・章フォルダ・雛形の場所・Hyperframes の版・話者・読みの辞書・退避先）を `course.yaml` から読む（`course_config.py`）。
+  シェルの3本（unit_build・render_units・render_status）は Windows でも動くように Python にした（振る舞いは同じ）
+- `tts.py` の読みの辞書は、埋め込みの表をやめて講座の `tts-readings.tsv`（lecture_movie と同じ形式）にした。作った直後に `after-tts/` へ自動で退避する
+- `check_clicks.py` にユニットのフォルダを渡すモードを足した（`assets/voice` と、`index.html` の時刻で完成動画を測る）
+- **エージェント `slide-reviewer`**：汎用の観点は本体に、講座だけの観点は講座の `.claude/slide-reviewer-extra.md` に分けた
+- references に `slide-format.md`・`unit-playbook.md`・`production-checklist.md`、templates に `course.example.yaml`・`slide-unit/`・`slide_parts.example.py`・`slide-reviewer-extra.md`
+- 確かめたこと：既存の講座の4ユニット（座学・冒頭・実践の本体2本）で、移した検査の出力と、slides.py から作り直した HTML（63枚）と STORYBOARD が講座の版と一致した。
+  `tts.py --dry-run` が TTS に渡す文字列も一致した
+- 移さなかったもの：小テストの ref 番号を数える道具（`udemy_quiz_payload.py` と publish-video-course に置き換わった）、画面を切り出して拡大する部品（エディターは窓全体を映す）
 
 ### 0.5.0
 
@@ -232,11 +271,7 @@ pip install -r scripts/requirements.txt
 - **cue の照合器の表を2層に**：かな⇔漢字と一般の同音語はプラグイン、分野の語は講座側
 - **Gemini API 経由の TTS**（新しい世代のモデル）：振り分け・429/5xx の再試行・402 の明示
   （WAV ヘッダの連結と演技指示の content filter は 0.4.0 で `tts-readings.md` に書いた。合成側の実装は未）
-- **Hyperframes のスライド型（座学と実践の本体）の移植**（次の版で最優先）：スキル `make-slide-lecture`、
-  道具（slide_kit・make_unit・tts・pad_audio・word_times・make_beats・check_*・hira_*・make_lecture・unit_build・render_status など約30本）、
-  講座の設定ファイル（`course.yaml`）、エージェント `slide-reviewer`（汎用の観点は本体、講座の指示は追加観点のファイル）。
-  行頭・行末の無音の挿入、語末の実測時刻、レクチャーの連結、表示が話し始めより遅い要素の検査、行送りの検査を含む。
-  今は講座ごとに写していて、直しが片方の講座にしか入っていない
+- **講座側の写しの整理**：スライド型の講座の `tools/` を、このプラグインの scripts と `course.yaml` に置き換える
 - 塗りの道具：行の中の語だけを塗るモード、アバターの画像照合（`image_templates`）、読み落とした所の箱を規則に書く（`extra_boxes`）、
   拡大して読み直す点検（`--scale 2`）と帯のシート、`fixed_boxes` の `only` と当たった数の表、塗った理由の記録
 - **作り直しを1本流すドライバ**（ロック → 検査 → 退避 → 音声 → 動画 → 照合 → 検査 → 要約1行）と、

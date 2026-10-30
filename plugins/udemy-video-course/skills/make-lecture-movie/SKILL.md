@@ -11,7 +11,7 @@ allowed-tools: Read, Write, Glob, Bash
 > **位置づけ**：スライド（`.pptx`）と台本（`_transcript.md`）の**下流**。1レクチャー＝1デック＝1台本（basename 共通）。
 > 上流の `write-lecture-doc`（解説ドキュメント）・`make-lecture-slides`（pptx と台本）は**プラグインに入っていない**。講座側に用意するか、pptx と台本を手で作る。
 >
-> **新しい講座では、Hyperframes のスライド型（スキル `make-slide-lecture`（次の版で追加。今は講座側の tools/ で組む））を先に検討する。** 図解を語りに合わせて出せ、検査の道具と slide-reviewer がそろっている。
+> **新しい講座では、Hyperframes のスライド型（[[make-slide-lecture]]）を先に検討する。** 図解を語りに合わせて出せ、検査の道具と slide-reviewer がそろっている。
 > pptx の型は、制作者から受けた指摘（教材感・空の箱・切り替えの多さ）への対処が入っていない旧経路として残す。
 >
 > **由来**：Marp ベースの先行実装を土台に、入力スライドを **Marp md → PowerPoint(.pptx)** に、レクチャー単位を **ページ分割 → basename ペア解決**に移植したもの。TTS・「間」・ffmpeg 合成のコアは流用。
