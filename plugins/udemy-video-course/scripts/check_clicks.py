@@ -17,6 +17,8 @@
     python check_clicks.py <audio_dir>/*.wav                          # 1 だけ
     python check_clicks.py <audio_dir>/*.wav --video out.mp4 --starts 0,7.35,15.14
     python check_clicks.py --video out.mp4 --starts-file starts.txt   # 1 行 1 時刻（秒）
+    python check_clicks.py videos/<unit> [videos/<unit> ...] [--wav-only]  # Hyperframes のユニット
+      （assets/voice/*.wav と、renders/video.mp4 を index.html の <audio data-start> の時刻で測る）
 
 既存の音声を直すときは、**サンプル数を変えずに先頭のヘッダ分をゼロで埋める**（ヘッダ直後は実測で完全な無音なので段差なくつながる）。
 削除すると尺が縮み、尺・字幕・強調のきっかけの時刻がまとめて無効になる。
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import array
+import re
 import subprocess
 import sys
 import wave
@@ -86,6 +89,33 @@ def video_problems(mp4: Path, starts: list[float]) -> list[str]:
             for t, p in peaks_at(s, starts) if p > CLICK_LEVEL]
 
 
+def voice_starts(index_html: Path) -> list[float]:
+    """Hyperframes の index.html から、音声クリップが始まる時刻を取る。"""
+    starts: set[float] = set()
+    for tag in re.findall(r"<audio[^>]*>", index_html.read_text(encoding="utf-8")):
+        m = re.search(r'data-start="([0-9.]+)"', tag)
+        if m:
+            starts.add(float(m.group(1)))
+    return sorted(starts)
+
+
+def unit_problems(unit: Path, wav_only: bool) -> tuple[int, list[str]]:
+    """ユニット1つ分（wav の先頭と、レンダリング済みならクリップの開始点）。"""
+    wavs = sorted((unit / "assets" / "voice").glob("*.wav"))
+    if not wavs:
+        return 0, [f"{unit.name}: 音声が1本も無い（先に tts.py を回す）"]
+    problems: list[str] = []
+    for w in wavs:
+        with wave.open(str(w)) as f:
+            problems += head_problems(f"{unit.name}/{w.name}", f.readframes(f.getnframes()))
+    mp4, idx = unit / "renders" / "video.mp4", unit / "index.html"
+    if not wav_only and mp4.is_file() and idx.is_file():
+        starts = voice_starts(idx)
+        if starts:
+            problems += [f"{unit.name}/{x}" for x in video_problems(mp4, starts)]
+    return len(wavs), problems
+
+
 def main() -> int:
     for st in (sys.stdout, sys.stderr):
         try:
@@ -97,7 +127,25 @@ def main() -> int:
     ap.add_argument("--video", type=Path, default=None)
     ap.add_argument("--starts", default="", help="区間の音声が始まる時刻（秒・カンマ区切り）")
     ap.add_argument("--starts-file", type=Path, default=None, help="1 行 1 時刻（秒）")
+    ap.add_argument("--wav-only", action="store_true", help="ユニットを渡したとき、動画の検査を省く")
     a = ap.parse_args()
+    units = [w for w in a.wavs if w.is_dir()]
+    if units:
+        if len(units) != len(a.wavs):
+            print("ユニット（フォルダ）と wav を混ぜて渡さない", file=sys.stderr)
+            return 2
+        ng = 0
+        for u in units:
+            n, probs = unit_problems(u, a.wav_only)
+            for x in probs:
+                print(f"  NG {x}")
+            ng += bool(probs)
+            if not probs:
+                print(f"OK {u.name}: 音声 {n} 本" + ("" if a.wav_only else "・レンダリング") + "ともクリック無し")
+        if ng:
+            print(f"★ {ng} ユニットに問題あり。直すときはサンプル数を変えずに先頭のヘッダ分をゼロで埋める")
+            return 1
+        return 0
     starts = [float(x) for x in a.starts.split(",") if x.strip()]
     if a.starts_file:
         starts += [float(x) for x in a.starts_file.read_text(encoding="utf-8").split() if x.strip()]

@@ -1,0 +1,48 @@
+# 講座の設定（Hyperframes のスライド型の道具が読む）。講座のリポジトリの直下に `course.yaml` として写して埋める。
+# 道具は作業ディレクトリから上へたどって最初の course.yaml を使う（環境変数 COURSE_ROOT でも指定できる）。
+# 書かなかったキーは scripts/course_config.py の DEFAULTS になる。確かめるときは `python course_config.py`。
+
+# STORYBOARD・BRIEF の audience に入る受講者像（1行）
+audience: "<試験名>の受験者。<前提の知識>が分かる人"
+
+# 置き場所（講座の直下から）
+videos_dir: videos                     # ユニット videos/<slug>/
+lectures_dir: lectures                 # ユニット doc
+template_dir: videos/_template         # 新しいユニットに写す枠組み（templates/slide-unit/ とフォントを置く）
+lectures_out_dir: videos/_lectures     # 冒頭・本体・末尾を連結した講義
+audio_backup_dir: videos/_audio-backup # 音声の退避（git 管理外にする）
+parts_dir: videos/_shared              # slides.py が import する講座の部品（templates/slide_parts.example.py から作る）
+
+# doc-id の章番号 → lectures/ 下のフォルダ（例の名前は講座の章に置き換える）。書かなければ "01" のような2桁の番号になる
+chapter_dirs:
+  0: 00_intro
+  1: 01_basics
+  99: 99_outro
+
+# ユニット doc の名前に入れる種別（<doc-id>_<種別><slug>.md）。冒頭・末尾（lecture-…）は frame
+doc_kind_tokens:
+  lecture: 座学_
+  handson: 実践_
+  frame: ""
+handson_suffix: -handson               # 実践の本体のユニット名の末尾
+# 実践の本体の SCRIPT.md の Line 1 の雛形（入れ忘れが続いたので make_unit.py が置く）
+handson_line1: "では、手を動かしましょう。このレッスンのREADMEに沿って進めます。手順は、Nつです。手順1で、…"
+# ユニット doc の「参照」に並べる講座の資料
+doc_refs:
+  - research/<一次資料の要約>.md
+
+# 型の文書（BRIEF に書く）。空ならプラグインの references/slide-format.md
+slide_format_doc: ""
+
+# 描画の道具。講座の途中で版を変えない（描画が変わり、撮り直しになる）
+hyperframes_version: "0.8.149"
+faceless_scripts: ~/.claude/skills/faceless-explainer/scripts
+
+tts:
+  voice: Callirrhoe
+  model: gemini-3.1-flash-tts-preview
+  instruction: tts-instruction.md      # 1行目が `Voice：<名前>`。既定では声の名前だけを使う（--style で演技指示も渡す）
+  readings: tts-readings.tsv           # 読みの辞書（表記<TAB>読み）。TTS に渡す文だけを置き換える
+
+# Google Cloud のプロジェクト（hira_check.py・hira_narrow.py の Vertex AI）はここに書かない。
+# 環境変数 GOOGLE_CLOUD_PROJECT か --project で渡す（リポジトリに名前を残さない）

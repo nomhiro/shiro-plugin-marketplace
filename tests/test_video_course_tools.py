@@ -605,3 +605,94 @@ def test_made_audio_is_backed_up_without_overwriting(tmp_path):
     assert d1 != d2 and d2.name == "L1-1-2"
     assert sorted(x.name for x in d1.iterdir()) == [".manifest.json", "speech_01.wav"]
     assert backup_audio(a, [], tmp_path / "bk", "L1-1") is None
+
+
+
+# ---------------------------------------------------------------- Hyperframes のスライド型
+def test_course_config_defaults_without_a_file(tmp_path, monkeypatch):
+    """course.yaml が無ければ、作業ディレクトリを講座の直下とみなして既定値で動く。"""
+    import course_config
+    monkeypatch.delenv("COURSE_ROOT", raising=False)
+    c = course_config.load(tmp_path)
+    assert c.config_path is None and c.root == tmp_path.resolve()
+    assert c.videos == (tmp_path / "videos").resolve()
+    assert c.hyperframes == "hyperframes@0.8.149"
+    assert c.chapter_dirs == {}
+
+
+def test_course_config_is_found_upwards_and_merges_nested_keys(tmp_path, monkeypatch):
+    import course_config
+    monkeypatch.delenv("COURSE_ROOT", raising=False)
+    (tmp_path / "course.yaml").write_text(
+        "audience: 受験者\nchapter_dirs:\n  1: 01_basics\ntts:\n  voice: Kore\n", encoding="utf-8")
+    deep = tmp_path / "videos" / "u1"
+    deep.mkdir(parents=True)
+    c = course_config.load(deep)
+    assert c.root == tmp_path.resolve() and c.audience == "受験者"
+    assert c.chapter_dirs == {1: "01_basics"}
+    assert c.tts("voice") == "Kore"
+    assert c.tts("model") == course_config.DEFAULTS["tts"]["model"]   # 入れ子は上書きでなく足し合わせ
+    assert c.unit("u1") == deep.resolve()
+
+
+def test_course_root_env_wins(tmp_path, monkeypatch):
+    import course_config
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "course.yaml").write_text("videos_dir: v\n", encoding="utf-8")
+    monkeypatch.setenv("COURSE_ROOT", str(other))
+    c = course_config.load(tmp_path)
+    assert c.root == other.resolve() and c.videos == (other / "v").resolve()
+
+
+def _run(script, args, cwd):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    scripts = Path(__file__).resolve().parents[1] / "plugins" / "udemy-video-course" / "scripts"
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    env.pop("COURSE_ROOT", None)
+    return subprocess.run([sys.executable, str(scripts / script), *args], cwd=cwd, env=env,
+                          capture_output=True, text=True, encoding="utf-8")
+
+
+def test_make_unit_uses_the_course_values_and_never_overwrites(tmp_path):
+    tpl = tmp_path / "videos" / "_template"
+    tpl.mkdir(parents=True)
+    (tpl / "frame.md").write_text("colors:\n", encoding="utf-8")
+    (tmp_path / "course.yaml").write_text(
+        "audience: テストの受講者\nchapter_dirs:\n  2: 02_tools\n", encoding="utf-8")
+    r = _run("make_unit.py", ["tool-handson", "道具を試す", "L2-1"], tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    u = tmp_path / "videos" / "tool-handson"
+    assert "audience: テストの受講者" in (u / "BRIEF.md").read_text(encoding="utf-8")
+    assert "## Line 1 — 手順1 (Frame 1)" in (u / "SCRIPT.md").read_text(encoding="utf-8")   # 実践の本体は Line 1 の型を置く
+    assert (tmp_path / "lectures" / "02_tools" / "L2-1_実践_tool-handson.md").is_file()
+    (u / "SCRIPT.md").write_text("手で書いた台本", encoding="utf-8")
+    r = _run("make_unit.py", ["tool-handson", "道具を試す", "L2-1"], tmp_path)
+    assert (u / "SCRIPT.md").read_text(encoding="utf-8") == "手で書いた台本"
+
+
+def test_make_unit_stops_when_the_chapter_is_not_in_course_yaml(tmp_path):
+    tpl = tmp_path / "videos" / "_template"
+    tpl.mkdir(parents=True)
+    (tpl / "frame.md").write_text("colors:\n", encoding="utf-8")
+    (tmp_path / "course.yaml").write_text("chapter_dirs:\n  1: 01_basics\n", encoding="utf-8")
+    r = _run("make_unit.py", ["x", "題", "L7-1"], tmp_path)
+    assert r.returncode != 0 and "chapter_dirs" in (r.stdout + r.stderr)
+
+
+def test_click_check_reads_audio_starts_from_the_composition(tmp_path):
+    from check_clicks import voice_starts
+    idx = tmp_path / "index.html"
+    idx.write_text('<audio id="a" data-start="0"></audio><audio data-start="7.35" src="x"></audio>'
+                   '<audio data-start="7.35"></audio><div data-start="3"></div>', encoding="utf-8")
+    assert voice_starts(idx) == [0.0, 7.35]
+
+
+def test_slide_template_palette_has_every_key_slide_kit_reads():
+    from pathlib import Path
+    import slide_kit
+    frame = Path(__file__).resolve().parents[1] / "plugins" / "udemy-video-course" / "templates" / "slide-unit" / "frame.md"
+    assert set(slide_kit.load_palette(frame)) == set(slide_kit._FRAME_KEYS)

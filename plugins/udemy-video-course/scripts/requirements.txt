@@ -22,6 +22,8 @@ google-genai>=1.0
 rapidocr-onnxruntime>=1.3
 opencv-python-headless>=4.8
 PyYAML>=6.0
+# Hyperframes のスライド型（slide_kit.py が同梱の書体で字幅を実測する。course.yaml も読む）
+fonttools>=4.40
 
 # 以下はシステム前提のため pip 対象外（参考）:
 #   - ffmpeg / ffprobe        : 動画合成・尺取得・検査（PATH に必要）
