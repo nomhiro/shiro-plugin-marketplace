@@ -77,7 +77,7 @@ python "$P/sheet.py" $U 1 4 7 ...                    # 着地の画像を並べ�
 python "$P/slide_table.py" videos/$U --write <ユニット doc>   # §5 を書き出す
 ```
 
-親が回すもの: `render_units.py <unit>...`（1本ずつ順に。背景で流したら、終わりの通知のあと `render_status.py` で数えてから報告）、`make_srt.py`（手元の確認用）、`make_lecture.py`。
+親が回すもの: `render_units.py <unit>`（**1本ずつ前景で**。回す前に空きメモリを見る。まとめて裏で流すとメモリ不足で止められる。止められたら `render_status.py` で数えてから報告）、`make_srt.py`（手元の確認用）、`make_lecture.py`。
 
 ### 音声の回し方
 - **1本ずつ前景で**作る（複数をバックグラウンドで続けて回すと、メモリ不足で止められた）。`--only` なしで再実行しない（既存の音声が全部作り直され、語末が全部ずれる）
