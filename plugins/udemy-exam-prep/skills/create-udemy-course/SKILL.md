@@ -415,6 +415,15 @@ await fetch('/api-2.0/courses/<id>/', { method: 'PATCH', credentials: 'include',
 画面で説明欄を直すときは、欄がリッチテキスト（ProseMirror）なので、**箇条書きはツールバーのリストボタンで作る**
 （「・」を打っても箇条書きにならない）。入力後は innerText を原稿と突き合わせる（原稿に無い語が末尾に紛れていた例がある）。
 
+### 公開中の講座のランディングページを直すとき
+
+- **原稿は Udemy の現行値から作る。** `udemy-course-meta.md` の原稿は、公開後に Udemy 側で直した分が反映されていないことがある。
+  GET `/api-2.0/courses/<id>/?fields[course]=title,headline,description,what_you_will_learn_data,requirements_data,who_should_attend_data`
+  とコースメッセージ（下記）を読んで保存しておき（変更前の記録になる）、直したい箇所だけを置き換える。置き換え元が1回だけ現れることをスクリプトで確かめる
+  > 実績: 4講座の日本語出題版への更新で、meta の原稿は旧タイトル（試験コードの変更前）や旧表記を含んでいた。そのまま入れると Udemy の新しい値を古い値に戻すところだった。
+- 送る前に、字数（サブタイトル120・学習目的160・メッセージ1,000）、ドット付き文字列、Markdown の記号（`**`・バッククォート・`|`）を検査する
+- PATCH のあとは GET の値が原稿と完全に一致するかを比べる。**公開ページ（`/course/<slug>/`）は API より遅れて切り替わる**（実績: 1講座は1時間近く旧文面のままだった）。反映の確認は API の読み戻しで行い、公開ページはしばらくしてから見る
+
 演習テストの設定と投入は [[upload-practice-tests]]（テストの作成は API では 403 になる）。
 動画講座の**クイズ**（simple-quiz）は別の経路で、`udemy-video-course` の `publish-video-course` が扱う。
 
@@ -474,7 +483,21 @@ type(解答N) → click(応答に追加します) → type(解答N+1) → click(
 > `beforeunload` の確認ダイアログで止まり、ネイティブのダイアログが出るとブラウザ操作が
 > 固まる（実績: ユーザーに「このサイトを離れる」を押してもらって復帰した）。
 > **保存とリロードでの確認を済ませてから**、ダイアログが出うることをユーザーに伝え、
-> 出たら押してもらう。
+> 出たら押してもらう。**別のページへ移るときは、このタブから移らず新しいタブで開く**とダイアログを避けられる。
+
+### 既存のメッセージを書き換える（Claude in Chrome）
+
+**API の PATCH / PUT（`/api-2.0/courses/<id>/course-messages/<messageId>/`）は 500 になる。** 画面の「保存」は
+一覧への POST（`/api-2.0/courses/<id>/course-messages/`）を送り、既存の2件（welcome / complete）をそのまま更新する。
+読み取りは GET `/api-2.0/courses/<id>/course-messages/` でできる。
+
+1. メッセージ画面の2つの編集欄（`[contenteditable="true"]`）を、今の本文と突き合わせてどちらが歓迎・お祝いかを決める
+2. 欄に focus し、**`document.execCommand('selectAll')` で欄の中身を全部選んでから**、`text/html` を入れた `DataTransfer` で `paste` イベントを送る。
+   全部選ばずに送ると、前の本文の後ろに追加される（実績: 字数が倍になった。保存前に気づいて選び直した）
+3. 欄の innerText が原稿と一致するのを確かめてから、右上の「保存」を実マウスで押す
+4. GET で、件数が2件のままで、本文（HTML）が原稿と一致するのを確かめる
+
+> 実績: 4講座のメッセージ7件をこの手順で書き換えた。7件とも HTML まで原稿と一致し、件数も2件のままだった。
 
 ### 歓迎のメッセージ（構成）
 
