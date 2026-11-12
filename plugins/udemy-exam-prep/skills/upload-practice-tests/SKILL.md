@@ -30,6 +30,8 @@ Udemy のコースに問題集をアップロードして
 
 1. **コース管理ページの URL**（例: `https://www.udemy.com/instructor/course/XXXXX/manage/curriculum/`）— まず `udemy-course-meta.md` から
 2. **各テストの quizId** — まず `udemy-course-meta.md` の対応表から。無ければカリキュラムページの `編集` リンクから読む
+   - **投入の前に API で一覧を読み直し、対応表と照らす。** `/api-2.0/courses/<courseId>/instructor-curriculum-items/?fields[quiz]=title,type,id` で現行の quizId と並び順を読み、各テストの1問目（`/api-2.0/quizzes/<quizId>/assessments/?page_size=1&fields[assessment]=prompt`）が、入れようとしている回の quiz.csv の版と同じ問題かを確かめてから投入する。食い違っていたら対応表を API の値に直し、更新履歴に「以前の記録は古い値だった」と残す
+   > 実績: 4講座の改訂で、4講座とも `udemy-course-meta.md` の quizId が古い値だった（テストを作り直した後に表を更新していなかった）。記録のまま編集画面を開くと別のテスト、または存在しないテストを開くことになる。一括アップロードはテストの問題を全部置き換えるので、回を取り違えると別の回の問題で上書きしてしまう
 3. **アップロード対象** — 全セクション or 特定セクションのみ
 
 ### コースが公開済みかを確かめる
