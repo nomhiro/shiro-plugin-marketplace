@@ -34,6 +34,10 @@ Udemy 演習テストコースの作成・quiz.csv のアップロード・公�
 - **最後の式の値が返る。** `return` は書かない。オブジェクトは `JSON.stringify` して返すと読みやすい
 - **1回の実行は45秒で CDP がタイムアウトする**（`Runtime.evaluate timed out after 45000ms`）。
   ページ側の処理は続くので、長い処理はバックグラウンドで起動し、状態を別の呼び出しで読む（`__u.runBg` / `__u.auditBg`）
+- **返す文字列に `名前=値;` の並びが入ると、結果が `[BLOCKED: Cookie/query string data]` に置き換わる。**
+  Cookie やクエリ文字列と見なされるため。区切りには `:` や `|` を使うか、照合値（SHA256 など）にして返す。
+  URL の一覧のように避けられないものは、127.0.0.1 の受け口へ POST してファイルで読む
+  > 実績: 公開後の照合で `id=...;count=...;` の形で返したら遮断された。照合値にして返して通った。
 
 どちらの手段でも、要素はアクセシビリティツリー由来の ref / role / name で取る（CSS セレクタは Udemy の動的構造では当たらないことが多い）。
 
@@ -339,6 +343,9 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" .upload/*/quiz.csv  
    - `runAll`（同期版）は使わない。通常モードでは1問でも45秒を超えたことがある
 5. 全問が終わったら（`jobStatus()` が `running:false`。保存の途中で再読み込みしない）**ページを再読み込みし、ヘルパーの読み込みと `__u.load(<セクション番号>)` をやり直してから** `__u.auditBg(1, <問題数>)` で照合し、`__u.auditStatus()` を読む。`at` が進捗、`mismatch` が CSV と食い違う問題、`err` が照合中に例外が出た問題。`done: true` かつ `mismatch` と `err` が空なら、サーバーに保存された内容が CSV と完全一致
    > 実績: 同期版の `audit` を50問に掛けると45秒を超え、途中の例外で完了フラグが立たないまま止まった。`auditBg` は1問ずつ例外を捕まえて最後まで進む。同期版は 15 問程度までに留める。
+   - **`__u.auditStatus()` はオブジェクトではなく JSON の文字列を返す。** 中身を判定するときは `JSON.parse(__u.auditStatus())` にする（文字列のまま `.mismatch` を読むと `undefined` になり、「不一致なし」と取り違える）
+   - **起動と結果の読み取りは別の `javascript_tool` 呼び出しに分ける。** ヘルパーの読み込み・`load`・`auditBg` の起動・完了待ちを1回の呼び出しにまとめると、45秒の上限を超えることがある。1回目で `eval(...)` → `await __u.load(N)` → `__u.auditBg(1, N)` まで（起動だけで返す）、2回目以降で `JSON.parse(__u.auditStatus())` を読み、`done: true` になるまで間を空けて読み直す
+   > 実績: 4講座24本の照合で、読み込みから完了待ちまでを1回にまとめた呼び出しが45秒を超えて CDP がタイムアウトした。ページ側の照合は続いていたので、`auditStatus()` を別の呼び出しで読めば結果は取れた
 6. `mismatch` / `err` の問題だけ `runBg` でやり直し、もう一度 `auditBg` する
 7. 次の本へ進む（同じタブで編集画面を移動し、手順2から）。全本が終わったら公開する（下記）
 
@@ -374,7 +381,7 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" .upload/*/quiz.csv  
 | `runBg(list, 'link')` | 本文に触れず、素の URL だけを `<a target="_blank">` にして保存する（一括アップロード後の仕上げ） |
 | `links` | `run` 時のリンク化の有無（既定 `true`）。`false` にすると照合でも未リンクを数えない |
 | `stop()` | 実行中の `runBg` / `auditBg` を次の問題の手前で止める |
-| `auditBg(a, b)` / `auditStatus()` | バックグラウンドで照合 / `at`・`mismatch`・`err`・`hidden`・`done`。素の URL が残る問題（`unlinked` > 0）も `mismatch` に入る |
+| `auditBg(a, b)` / `auditStatus()` | バックグラウンドで照合 / `at`・`mismatch`・`err`・`hidden`・`done`。素の URL が残る問題（`unlinked` > 0）も `mismatch` に入る。**`auditStatus()` の戻り値は JSON の文字列**（`JSON.parse` して読む） |
 | `audit(a, b)` | 同期版の照合（15問程度まで） |
 | `dismiss()` | 「更新が保存されていません」モーダルを×で閉じる |
 
@@ -389,6 +396,23 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/validate_quiz_csv.py" .upload/*/quiz.csv  
 4. 「指導目的のお知らせとして送信」は受講生へのメール通知になる（月4回まで）。**オフのまま**にする
 5. 送信後、「演習テストが公開されました！」が出るまで最大20秒ほどかかる。ダイアログが残っていても、再クリックせずに待つ
 6. 公開の結果は `udemy-course-meta.md` の更新履歴に残す（[[upload-practice-tests]]「更新履歴を残す」）
+
+#### 多数のテストを続けて公開する（Claude in Chrome）
+
+1本ずつ、次の順で進める。メッセージは手で打たず、`javascript_tool` でダイアログの入力欄に入れる
+（React の欄なので、`HTMLTextAreaElement.prototype` の value のネイティブ setter で値を入れて `input` イベントを出す）。
+
+1. 編集画面（`/course/<courseId>/manage/practice-test/?quizId=<quizId>`）を開き、「変更内容を公開」を実マウスで押す
+2. `javascript_tool` で次の4点をすべて確かめてから、メッセージを入れる。1つでも外れたら入れずに止まる
+   - 画面上部のテスト名が、いま公開する回と同じか（例: `CCAO-F 模擬試験 第3回`）。quizId の取り違えをここで止める
+   - ダイアログ（「学習者に更新メッセージを送信」）が開いているか
+   - 「指導目的のお知らせとして送信」のチェックが外れているか
+   - 入れたあとの欄の値が、送る文面と完全に一致するか
+3. 「変更を送信して公開」が押せる状態（disabled でない）なのを確かめてから、実マウスで押す。座標は最初の1本でスクリーンショットから取り、以後は同じ画面幅なら使い回せる
+4. 10秒ほど待ち、「演習テストが公開されました」の文言を確かめてから次の本へ進む
+5. 全本を公開したら、API（`/api-2.0/quizzes/<id>/assessments/`）で全本を quiz.csv と照合する。公開前の API は旧版を返すので、ドメイン内訳などの確認はここで行う。件数・タイプ内訳・ドメイン内訳に加え、全問の「問題文・正解・選択肢数・選択肢」から作った照合値（SHA256）を比べる。出典がリンクになった問題の数も、quiz.csv で出典行に URL がある行の数と比べる
+
+> 実績: 4講座・24本をこの手順で公開した。1本あたり約20秒で、取り違えはなかった。公開後の照合は24本とも一致した。
 
 ### テスト自体を削除→再作成する手順
 
