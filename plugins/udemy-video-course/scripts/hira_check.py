@@ -15,7 +15,7 @@
 - 2 種類の指示（P1・P2）で出す。**2 回以上同じ音なら確からしい。** Gemini も 1 回は聞き違えうる。
 - 同じ話者・同じ文脈で「正しい入力」と「疑う入力」を合成し、同じ方式にかけて**音で分けられるか**を先に確かめるとよい（対照実験）。
 - 音声は変更しない。Vertex AI の Gemini を ADC で呼ぶ（pip install google-genai。
-  プロジェクトは --project か環境変数 GOOGLE_CLOUD_PROJECT）。
+  プロジェクトは --project か環境変数 GOOGLE_CLOUD_PROJECT。値は `gcloud config get-value project` で取る。全窓 ERR はプロジェクトか認証の誤り）。
 
 終了コード: 0＝書き起こした／2＝引数・認証の不足。誤読かどうかの判定はしない（人が読む）。
 """

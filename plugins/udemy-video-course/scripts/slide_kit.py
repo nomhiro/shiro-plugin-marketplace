@@ -32,6 +32,104 @@ XFADE = 0.5                # 切り替えのクロスフェード（s）。こ�
 MAX_REVEALS = 6            # 1枚あたりのリビール上限。通常は 2〜4。列挙（手法名・アジェンダ）を1項目ずつ出す枚だけ 5〜6
 EM_CENTER = 0.38           # BIZ UDPGothic: 文字箱の中心は baseline の 0.38em 上（asc 0.8799 − 0.5）
 
+# ── 型（2026-11-26）: classic＝従来の大きさ／compact＝文字を小さく、箱を文字から決め、中身の中心を画面の中央に置く ──────
+# course.yaml の `slide_style`（既定 classic。上げ済みの講座のユニットを作り直しても見た目が変わらないように）。
+# compact の規則は references/slide-format.md「compact の型」。既存の講座の1ユニットで比べて決めた（ユーザー承認 2026-11-26）
+def _load_style() -> str:
+    try:
+        import course_config  # noqa: PLC0415
+        return str(course_config.load().data.get("slide_style") or "classic")
+    except Exception:  # course_config が無い・yaml が無いときは従来の型
+        return "classic"
+
+
+STYLE = _load_style()
+COMPACT = STYLE == "compact"
+PX = CQW                   # 1cqw の px（寸法の補助で使う別名）
+TOP = 230                  # compact: 中身の上端の下限（タイトルの下端から約 85px）
+CENTER_Y = 540             # compact: 中身の塊の中心を置く高さ（画面の中央）
+ROW_GAP = 20               # compact: 行どうしの隙間
+
+
+def top_for(block: float) -> float:
+    """compact: 高さ block の塊の中心を画面の中央に置いたときの上端。上端は TOP より上にしない
+    （「タイトルの下が空きすぎ」と「上すぎる」の両方を受けて、2026-11-26 にこの置き方に決めた）。"""
+    return max(TOP, CENTER_Y - block / 2)
+
+
+def box_h(sizes) -> int:
+    """箱の高さを中の文字から決める。sizes＝各行の文字の大きさ（cqw）。
+    1行＝文字の 2.2 倍。複数行＝行送り 1.5 倍＋上下に文字の 0.9 倍の余白。"""
+    sizes = list(sizes)
+    if len(sizes) == 1:
+        return round(sizes[0] * PX * 2.2 / 2) * 2
+    span = sum((a + b) / 2 * PX * 1.5 for a, b in zip(sizes, sizes[1:]))
+    return round((span + (sizes[0] + sizes[-1]) / 2 * PX + 2 * 0.9 * max(sizes) * PX) / 2) * 2
+
+
+def box_w(s: "Slide", rows) -> int:
+    """箱の幅＝最も長い行＋左右に文字の 1.6 倍の余白（20px 単位に切り上げ）。rows＝[(文字, 大きさ[, 色])]。"""
+    import math  # noqa: PLC0415
+    w = max(s.fonts.width(r[0], r[1], 700) for r in rows) + 2 * 1.6 * max(r[1] for r in rows) * PX
+    return math.ceil(w / 20) * 20
+
+
+def text_rows(s: "Slide", cx, y, h, rows, color="ink"):
+    """箱（上端 y・高さ h）の中に、複数行を中央そろえで置く。rows＝[(文字, 大きさ[, 色])]。行送りは 1.5 倍。"""
+    sizes = [r[1] for r in rows]
+    offs = [0.0]
+    for a, b in zip(sizes, sizes[1:]):
+        offs.append(offs[-1] + (a + b) / 2 * PX * 1.5)
+    top = y + h / 2 - offs[-1] / 2
+    for r, o in zip(rows, offs):
+        s.text(cx, top + o, r[0], r[1], r[2] if len(r) > 2 else color, bold=True, overlap=True)
+
+
+class PairGeom:
+    """pair_geom の結果。xL・xR＝左右の箱の左端、w・h＝箱の幅・高さ、ax1・ax2＝矢印の始点・終点の x。"""
+    xL: float
+    xR: float
+    w: int
+    h: int
+    ax1: float
+    ax2: float
+
+
+def pair_geom(s: "Slide", L, R, arrow: bool = True, cx: float = 960) -> PairGeom:
+    """左右に並ぶ2つの箱を、同じ幅・同じ高さにして cx を中心に置く。
+    矢印あり＝箱・28・矢印 120・28・箱、矢印なし（比べる2つ）＝箱・48・箱。"""
+    g = PairGeom()
+    g.w = max(box_w(s, L), box_w(s, R))
+    g.h = max(box_h([r[1] for r in L]), box_h([r[1] for r in R]))
+    mid = 176 if arrow else 48
+    g.xL = cx - (2 * g.w + mid) / 2
+    g.xR = g.xL + g.w + mid
+    g.ax1, g.ax2 = g.xL + g.w + 28, g.xR - 28
+    return g
+
+
+def card_h(n: int, name_size: float, line_size: float) -> int:
+    """名前1行＋説明 n 行のカードの高さ（上下に名前の 0.9 倍、名前→説明 1.6 倍、説明の行送り 1.6 倍）。"""
+    h = name_size * PX * 0.9 + name_size * PX + name_size * PX * 0.9
+    if n:
+        h += (name_size + line_size) / 2 * PX * 1.6 + (n - 1) * line_size * PX * 1.6 + line_size * PX / 2 - name_size * PX / 2
+    return round(h)
+
+
+def card_line_y(y: float, k: int, name_size: float, line_size: float) -> float:
+    """カード（上端 y）の説明の k 行目（0 から）の中心の y。"""
+    return y + name_size * PX * 0.9 + name_size * PX / 2 + (name_size + line_size) / 2 * PX * 1.6 + k * line_size * PX * 1.6
+
+
+def card_w(s: "Slide", items, name_size: float, line_size: float) -> int:
+    """items＝[(名前, [説明...]), ...]。同じ枚のカードを同じ幅にする（最も長い行＋左右に名前の 1.6 倍）。"""
+    import math  # noqa: PLC0415
+    w = 0.0
+    for name, lines in items:
+        w = max([w, s.fonts.width(name, name_size, 700)] + [s.fonts.width(t, line_size, 700) for t in lines])
+    return math.ceil((w + 2 * name_size * PX * 1.6) / 20) * 20
+
+
 # ★ 配色は `frame.md` の `colors:` が Source of Truth。ここに値を手で写さない（二重管理になる）。
 # slide_kit 内の名前 → frame.md のキー
 _FRAME_KEYS = {
@@ -176,6 +274,11 @@ class Slide:
         gid = f"{self.p}-{name}"
         if at - FADE < XFADE:
             raise ValueError(f"{self.id}: {name} のフェード開始 {at - FADE:.2f}s が切り替えの窓（{XFADE}s）に入る")
+        if self.beats and at < max(b[1] for b in self.beats) - 0.05 and getattr(self, "strict_order", False):
+            # 2026-10-31 AZ-104 L2-2 slide-review 中: 画面の枚（shot() で毎回描き直す）は、後に描いた層が前の層を全部覆う。
+            # 時刻が逆の reveal は一度も見えない（F21 の検索欄の枠）ので、警告ではなく止める
+            raise ValueError(f"{self.id}: {name} の着地 {at:.1f}s が直前までの reveal（{max(b[1] for b in self.beats):.1f}s）より早い。"
+                             "画面の枚は描き直しの層が重なるので、強調を語りの順（時刻の順）に並べる")
         if self.beats and at < max(b[1] for b in self.beats) - 0.05:
             # 2026-10-12: E() の出現回の取り違え（語の最初の出現を引いて、あとの行が先に出る）を早く拾う。例外にはしない（意図した順序もある）
             import sys as _sys
@@ -423,7 +526,7 @@ def _maybe_reveal(s: "Slide", name, at, note):
             yield
 
 
-def lesson_rows(s: "Slide", rows, check: bool = False, y0: float = 380, y1: float = 950, gap: float = 30, split: float = 720,
+def lesson_rows(s: "Slide", rows, check: bool = False, y0: float | None = None, y1: float = 950, gap: float = 30, split: float = 720,
                 show_at: float | None = None):
     """教材ページの行。行は**始めから薄い色で全部見えている**（地図）。語りがその行に来たら、
     行が青い面＋濃い文字で**強調**される（強調は残る＝進み具合が見える）。check=True で行に ✓（要点の枚）。
@@ -431,22 +534,40 @@ def lesson_rows(s: "Slide", rows, check: bool = False, y0: float = 380, y1: floa
     行の高さは (y1 − y0 − 隙間) を行数で割る（上限 170）。既定値は3行で 380/580/780（3-1-1 と同じ）。
     split は解説文の開始 x（名前の欄の幅）。長い名前（ロジスティック回帰 など）は大きくする。
     show_at: ページの途中（cut で入るフレーム）に置くときは、薄い行も語末（例「3つです」）でフェードさせる。"""
+    y0_given = y0
+    if y0 is None:
+        y0 = 380
     n = len(rows)
-    h = min(170.0, (y1 - y0 - (n - 1) * gap) / n)
+    bx, bw, tx = 40, 1840, 110
+    if COMPACT:
+        # compact: 行の高さ＝名前の文字の 2.2 倍・隙間 20。y1・gap は使わない。
+        # 名前だけの行（解説文なし）は名前の幅に合わせて左右の中央へ。y0 を渡さなければ、塊の中心が画面の中央（top_for）
+        ns, es = 2.8, 2.4
+        h = box_h([ns])
+        gap = ROW_GAP
+        if y0_given is None:
+            y0 = top_for(n * h + (n - 1) * gap)
+        if not any(r[2] for r in rows):
+            import math  # noqa: PLC0415
+            bw = math.ceil((max(s.fonts.width(r[1], ns, 700) for r in rows) + 2 * ns * PX * 1.6 + (60 if check else 0)) / 20) * 20
+            bx = (1920 - bw) / 2
+            tx = bx + ns * PX * 1.6
+    else:
+        h = min(170.0, (y1 - y0 - (n - 1) * gap) / n)
+        ns, es = (4.6, 4.0) if h >= 160 else (4.2, 3.8)
     ys = [y0 + i * (h + gap) for i in range(n)]
-    ns, es = (4.6, 4.0) if h >= 160 else (4.2, 3.8)
     with _maybe_reveal(s, "rows", show_at, "薄い行（地図）を出す"):
         for y, (_k, name, explain, _at) in zip(ys, rows):          # 始めから見えている: 薄い行
-            s.rect(40, y, 1840, h, "box")
-            s.text(110, y + h / 2, name, ns, "mute", "start", bold=True, fit=split - 160, overlap=True)
+            s.rect(bx, y, bw, h, "box")
+            s.text(tx, y + h / 2, name, ns, "mute", "start", bold=True, fit=split - 160, overlap=True)
             s.text(split, y + h / 2, explain, es, "mute", "start", fit=1840 - split - 100, overlap=True)   # 右端の ✓ の分を空ける
     for y, (key, name, explain, at) in zip(ys, rows):
         with s.reveal(key, at, f"「{name}」の行"):
-            s.rect(40, y, 1840, h, "box-subj")
-            s.text(110, y + h / 2, name, ns, "subj", "start", bold=True, fit=split - 160, overlap=True)   # 薄い行の上に重ねる（意図した重ね）
+            s.rect(bx, y, bw, h, "box-subj")
+            s.text(tx, y + h / 2, name, ns, "subj", "start", bold=True, fit=split - 160, overlap=True)   # 薄い行の上に重ねる（意図した重ね）
             s.text(split, y + h / 2, explain, es, "ink", "start", fit=1840 - split - 100, overlap=True)
             if check:
-                s.check(1810, y + h / 2, 44)
+                s.check(bx + bw - 70, y + h / 2, 44)
 
 
 # ── ページ（2026-10-08・ユーザー指示「スライドの移り変わりが多すぎる。1枚の情報量を多く」）──────────
@@ -585,22 +706,36 @@ def _row(s: "Slide", x, y, w, h, name, state, size):
 def position_map(s: "Slide", groups, gi: int, units, ui: int, at_group: float, at_unit: float):
     """groups = 章のまとまりの名前、gi = いまのまとまり（0始まり）。units = いまのまとまりのユニット名、ui = いまのユニット（0始まり）。
     始めは全部「これから／済み」で見えていて、語末 at_group でまとまり、at_unit でユニットが「いま」になる。"""
-    y0, y1, gap = 290, 1030, 12
-    gx, gw = 40, 700
-    ux, uw = 820, 1060
-    gh = (y1 - y0 - (len(groups) - 1) * gap) / len(groups)
-    uh = (y1 - y0 - (len(units) - 1) * gap) / len(units)
+    gs, us = 3.2, 3.6
+    if COMPACT:
+        # compact: 行の高さ・幅を文字から決め、左右・上下とも中央に置く（塊の中心が画面の中央）
+        import math  # noqa: PLC0415
+        gs, us = 2.4, 2.8
+        gh = uh = box_h([us])
+        gap = 16
+        gw = math.ceil((max(s.fonts.width(n, gs, 700) for n in groups) + 150) / 20) * 20
+        uw = math.ceil((max(s.fonts.width(n, us, 700) for n in units) + 150) / 20) * 20
+        gx = (1920 - (gw + 100 + uw)) / 2
+        ux = gx + gw + 100
+        nmax = max(len(groups), len(units))
+        y0 = top_for(nmax * gh + (nmax - 1) * gap)
+    else:
+        y0, y1, gap = 290, 1030, 12
+        gx, gw = 40, 700
+        ux, uw = 820, 1060
+        gh = (y1 - y0 - (len(groups) - 1) * gap) / len(groups)
+        uh = (y1 - y0 - (len(units) - 1) * gap) / len(units)
     gys = [y0 + i * (gh + gap) for i in range(len(groups))]
     uys = [y0 + i * (uh + gap) for i in range(len(units))]
     for i, (y, n) in enumerate(zip(gys, groups)):
-        _row(s, gx, y, gw, gh, n, "done" if i < gi else "todo", 3.2)
+        _row(s, gx, y, gw, gh, n, "done" if i < gi else "todo", gs)
     for i, (y, n) in enumerate(zip(uys, units)):
-        _row(s, ux, y, uw, uh, n, "done" if i < ui else "todo", 3.6)
+        _row(s, ux, y, uw, uh, n, "done" if i < ui else "todo", us)
     with s.reveal("group", at_group, "いまのまとまりを青に"):
-        _row(s, gx, gys[gi], gw, gh, groups[gi], "now", 3.2)
+        _row(s, gx, gys[gi], gw, gh, groups[gi], "now", gs)
         s.arrow(gx + gw + 4, gys[gi] + gh / 2, ux - 10, gys[gi] + gh / 2, 18, lead=False)   # このまとまりの中身が右の一覧
     with s.reveal("unit", at_unit, "いまのユニット（このレクチャー）を青に"):
-        _row(s, ux, uys[ui], uw, uh, units[ui], "now", 3.6)
+        _row(s, ux, uys[ui], uw, uh, units[ui], "now", us)
 
 
 CSS_TEMPLATE = """    #root {

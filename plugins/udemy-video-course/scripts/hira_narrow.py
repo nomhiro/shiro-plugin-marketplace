@@ -68,8 +68,25 @@ def main() -> int:
             print(f"  {t0:5.1f}-{t1:5.1f} {tag}: {r}", flush=True)
     counts = count_readings([r for *_, r in rows], words)
     print("数:", "　".join(f"{w}={c}" for w, c in counts.items()))
-    if suspicious(counts, a.good):
-        print("→ 疑う読みが過半数。録り直すか、読みの辞書で直すか、言い換える")
+    # 2026-11-01: 語が行に2回以上あると、1回目が正しい読みで2回目の誤読が隠れる（AZ-104 L2-2 F16「職務ロール」）。
+    # 語を含む窓を、時刻が 3 秒以内でつながる「出現」ごとにまとめて、出現ごとにも数える。どれか1つでも過半数なら止める
+    hits = [(t0, r) for t0, _t1, _tag, r in rows if any(w in r.replace(" ", "") for w in words)]
+    groups, cur, last = [], [], None
+    for t0, r in hits:
+        if last is not None and t0 - last > 3.0:
+            groups.append(cur); cur = []
+        cur.append((t0, r)); last = t0
+    if cur:
+        groups.append(cur)
+    bad_group = False
+    if len(groups) > 1:
+        for g in groups:
+            c = count_readings([r for _t, r in g], words)
+            mark = "  ← 疑う読みが過半数" if suspicious(c, a.good) else ""
+            bad_group = bad_group or bool(mark)
+            print(f"  出現 {g[0][0]:5.1f}s〜:", "　".join(f"{w}={n}" for w, n in c.items()) + mark)
+    if suspicious(counts, a.good) or bad_group:
+        print("→ 疑う読みが過半数（行全体か、どれかの出現で）。録り直すか、読みの辞書で直すか、言い換える")
         return 1
     print("→ 通す（疑う読みは半分以下）")
     return 0

@@ -9,11 +9,16 @@
 
 形の約束: 青い札・青い字＝いま見ているもの（名前・答え・正解）／黒＝ふつうの札・矢印・説明／橙＝間違い（✗）だけ。
 大きさは 5.0（大きな名前）・3.0（主役）・2.4（注・札の中）の3段。
+compact の型（course.yaml の slide_style: compact。2026-11-26）は 5.0・2.4・2.0 の3段で、箱の寸法は文字から決め、
+中身の塊の中心を画面の中央に置く（slide_kit の box_h・box_w・pair_geom・card_h・top_for。references/slide-format.md「compact の型」）。
 """
-import slide_kit  # noqa: E402
-from slide_kit import Slide  # noqa: E402
+import math  # noqa: E402
 
-M, SM, BIG = 3.0, 2.4, 5.0
+import slide_kit  # noqa: E402
+from slide_kit import Slide, COMPACT, PX, box_h, top_for  # noqa: E402,F401
+from slide_kit import box_w, text_rows, pair_geom, card_h, card_line_y, card_w  # noqa: E402,F401
+
+M, SM, BIG = (2.4, 2.0, 5.0) if COMPACT else (3.0, 2.4, 5.0)
 
 # ── 現在地（章ごと）──────────────────────────────────────────────────────────
 # {章番号: (章の名前, [まとまりの名前...], {まとまりの番号: [ユニットの名前...]})}
@@ -28,27 +33,41 @@ def position(s, E, chapter: int, gi: int, ui: int, at_group: float, at_unit: flo
     slide_kit.position_map と同じ段組みに、右の一覧（いまのまとまりの中身）をくくる「[」を足し、矢印は水平にそこへ当てる。"""
     _title, groups, units = CHAPTERS[chapter]
     units = units[gi]
-    y0, y1, gap = 290, 1030, 12
-    gx, gw = 40, 700
-    ux, uw = 860, 1020
-    gh = (y1 - y0 - (len(groups) - 1) * gap) / len(groups)
-    uh = (y1 - y0 - (len(units) - 1) * gap) / len(units)
+    if COMPACT:
+        # compact: 行の高さ・幅を文字から決め、左右・上下とも中央に置く（塊の中心が画面の中央。上端は top_for）
+        gs, us = 2.4, 2.8
+        gh = uh = box_h([us])
+        gap = 16
+        gw = math.ceil((max(s.fonts.width(n, gs, 700) for n in groups) + 150) / 20) * 20
+        uw = math.ceil((max(s.fonts.width(n, us, 700) for n in units) + 150) / 20) * 20
+        gx = (1920 - (gw + 100 + 36 + uw)) / 2
+        ux = gx + gw + 100 + 36
+        nmax = max(len(groups), len(units))
+        y0 = top_for(nmax * gh + (nmax - 1) * gap)
+        y1 = y0 + len(units) * uh + (len(units) - 1) * gap
+    else:
+        gs, us = 3.2, 3.6
+        y0, y1, gap = 290, 1030, 12
+        gx, gw = 40, 700
+        ux, uw = 860, 1020
+        gh = (y1 - y0 - (len(groups) - 1) * gap) / len(groups)
+        uh = (y1 - y0 - (len(units) - 1) * gap) / len(units)
     gys = [y0 + i * (gh + gap) for i in range(len(groups))]
     uys = [y0 + i * (uh + gap) for i in range(len(units))]
     for i, (y, n) in enumerate(zip(gys, groups)):
-        slide_kit._row(s, gx, y, gw, gh, n, "done" if i < gi else "todo", 3.2)
+        slide_kit._row(s, gx, y, gw, gh, n, "done" if i < gi else "todo", gs)
     for i, (y, n) in enumerate(zip(uys, units)):
-        slide_kit._row(s, ux, y, uw, uh, n, "done" if i < ui else "todo", 3.6)
+        slide_kit._row(s, ux, y, uw, uh, n, "done" if i < ui else "todo", us)
     # 右の一覧をくくる「[」（初めから描く）。矢印は、いまのまとまりの行から水平に「[」へ当てる（再レビュー中: 斜めの矢印が済みの行を指して見えた）
     bx = ux - 36
     s.rect(bx, y0, 6, y1 - y0, "box-ink", 0)
     s.rect(bx, y0, 24, 6, "box-ink", 0)
     s.rect(bx, y1 - 6, 24, 6, "box-ink", 0)
     with s.reveal("group", at_group, "いまのまとまりを青に（中身の一覧への矢印）"):
-        slide_kit._row(s, gx, gys[gi], gw, gh, groups[gi], "now", 3.2)
+        slide_kit._row(s, gx, gys[gi], gw, gh, groups[gi], "now", gs)
         s.arrow(gx + gw + 4, gys[gi] + gh / 2, bx - 10, gys[gi] + gh / 2, 18, lead=False)
     with s.reveal("unit", at_unit, "いまのユニット（このレクチャー）を青に"):
-        slide_kit._row(s, ux, uys[ui], uw, uh, units[ui], "now", 3.6)
+        slide_kit._row(s, ux, uys[ui], uw, uh, units[ui], "now", us)
 
 
 # ── 書体に無い字・画面のはみ出しを、生成の時点で止める──────────
@@ -90,6 +109,7 @@ def shot(s, href, x, y, w, max_h=None, clear=14):
     先に白で周りを塗るので、同じ場所に描き直すと前の強調が消える（強調は一度に1つ）。
     返り値 hl(x0, y0, x1, y1) は、切り出しの画素の座標で強調の枠を当てる。hl.box は置いた (x, y, w, h)。"""
     from PIL import Image
+    s.strict_order = True   # 描き直しの層が重なるので、reveal は時刻の順でないと前の枠が見えない（slide_kit.reveal が止める）
     cw, ch = Image.open(s.unit / href).size
     k = w / cw
     if max_h and ch * k > max_h:
@@ -125,26 +145,45 @@ def _ex_lines(s, x, cy, ex, color, fit):
     """説明を1行（str）か2行（list）で置く。2行の行送りは 66px（SM の約1.43倍。check_spacing の文の行 1.4 倍）。"""
     lines = [ex] if isinstance(ex, str) else list(ex)
     n = len(lines)
+    pitch = round(SM * PX * 1.5) if COMPACT else 66
     for k, line in enumerate(lines):
-        s.text(x, cy + (k - (n - 1) / 2) * 66, line, SM, color, "start", bold=True, fit=fit, overlap=True)
+        s.text(x, cy + (k - (n - 1) / 2) * pitch, line, SM, color, "start", bold=True, fit=fit, overlap=True)
+
+
+SUM_NAME = 2.8 if COMPACT else M      # 要点の行の名前の大きさ
+
+
+def _sum_geom(n_rows, n_lines, y0):
+    """summary_rows・summary_late_line の共通の座標（行の高さ・隙間・上端）。"""
+    if COMPACT:
+        h = box_h([SUM_NAME]) if n_lines == 1 else box_h([SM] * n_lines)
+        gap = 20
+        if y0 is None:
+            y0 = top_for(n_rows * h + (n_rows - 1) * gap)
+    else:
+        if y0 is None:
+            y0 = 340 if n_rows <= 4 else 230
+        gap = 24
+        h = min(150, (1035 - y0 - gap * (n_rows - 1)) / n_rows)
+    return h, gap, y0
 
 
 def summary_rows(s, rows, split=760, y0=None):
     """要点の教材ページ。rows = [(名前, 説明, 語末, 注記)]。薄い行が始めから見え、語りに合わせて青く ✓。
     説明は str（1行）か list（2行。2026-10-18 L2-1: 地図の名前が長く、説明の欄が狭いとき）。
-    y0 の既定は 4行まで 340、5行以上 230（2026-10-18 data-usage slide-reviewer 高: 5行で2行の説明が枠に接した）。"""
-    if y0 is None:
-        y0 = 340 if len(rows) <= 4 else 230
-    h = min(150, (1035 - y0 - 24 * (len(rows) - 1)) / len(rows))
-    ys = [y0 + i * (h + 24) for i in range(len(rows))]
+    y0 の既定は 4行まで 340、5行以上 230（2026-10-18 data-usage slide-reviewer 高: 5行で2行の説明が枠に接した）。
+    compact では、行の高さを文字から決め、塊の中心を画面の中央に置く。"""
+    n_lines = max(1 if isinstance(r[1], str) else len(r[1]) for r in rows)
+    h, gap, y0 = _sum_geom(len(rows), n_lines, y0)
+    ys = [y0 + i * (h + gap) for i in range(len(rows))]
     for y, (nm, ex, _at, _n) in zip(ys, rows):
         s.rect(40, y, 1840, h, "box")
-        s.text(110, y + h / 2, nm, M, "mute", "start", bold=True, fit=split - 150, overlap=True)
+        s.text(110, y + h / 2, nm, SUM_NAME, "mute", "start", bold=True, fit=split - 150, overlap=True)
         _ex_lines(s, split, y + h / 2, ex, "mute", 1780 - split)
     for i, (y, (nm, ex, at, note)) in enumerate(zip(ys, rows)):
         with s.reveal(f"sum{i + 1}", at, note):
             s.rect(40, y, 1840, h, "box-subj")
-            s.text(110, y + h / 2, nm, M, "subj", "start", bold=True, fit=split - 150, overlap=True)
+            s.text(110, y + h / 2, nm, SUM_NAME, "subj", "start", bold=True, fit=split - 150, overlap=True)
             _ex_lines(s, split, y + h / 2, ex, "ink", 1780 - split)
             s.check(1810, y + h / 2, 44)
 
@@ -152,26 +191,45 @@ def summary_rows(s, rows, split=760, y0=None):
 def summary_late_line(s, n_rows, i, split, text, at, note, y0=None):
     """要点の i 行目（0 から）の2行目を、その文を語り始める語で後から出す（2026-10-20 L0-1 slide-reviewer 高: 2行目が行と一緒に出て、語りより早かった）。
     summary_rows には、その行の説明を [1行目, "　"]（全角の空白）で渡して2行ぶんの位置を取っておく。座標の決め方は summary_rows と同じ。"""
-    if y0 is None:
-        y0 = 340 if n_rows <= 4 else 230
-    h = min(150, (1035 - y0 - 24 * (n_rows - 1)) / n_rows)
-    y = y0 + i * (h + 24)
+    h, gap, y0 = _sum_geom(n_rows, 2, y0)
+    y = y0 + i * (h + gap)
+    half = round(SM * PX * 1.5) / 2 if COMPACT else 33
     with s.reveal(f"late{i + 1}", at, note):
-        s.text(split, y + h / 2 + 33, text, SM, "ink", "start", bold=True, fit=1780 - split, overlap=True)
+        s.text(split, y + h / 2 + half, text, SM, "ink", "start", bold=True, fit=1780 - split, overlap=True)
 
 
 def exam_row(s, y, lines):
-    """「試験」の札＋1〜3行。"""
-    s.rect(80, y - 34, 140, 68, "pill", 34)
+    """「試験」の札＋1〜3行。compact は札を 120×56 にし、行送りを M の 1.45 倍にする。"""
+    if COMPACT:
+        s.rect(90, y - 28, 120, 56, "pill", 28)
+        tx, pitch = 250, round(M * PX * 1.45)
+    else:
+        s.rect(80, y - 34, 140, 68, "pill", 34)
+        tx, pitch = 270, 82                                   # 行送り 1.42 倍
     s.text(150, y, "試験", SM, "wht", bold=True)
     n = len(lines)
     for k, t in enumerate(lines):
-        s.text(270, y + (k - (n - 1) / 2) * 82, t, M, "ink", "start", bold=True, fit=1560)   # 行送り 1.42 倍
+        s.text(tx, y + (k - (n - 1) / 2) * pitch, t, M, "ink", "start", bold=True, fit=1560)
+
+
+def card(s, y, name, lines, kind="box-white", color="ink", n=None, x=None, w=None):
+    """名前＋説明の行のカード（compact 用）。高さは card_h、幅は渡さなければ中身に合わせて左右の中央。
+    n を渡すと、後から足す説明の行の分も高さを取る（足す行は card_line_y の位置に置く）。"""
+    n = len(lines) if n is None else n
+    if w is None:
+        w = card_w(s, [(name, lines)], M, SM)
+    if x is None:
+        x = (1920 - w) / 2
+    s.rect(x, y, w, card_h(n, M, SM), kind)
+    tx = x + M * PX * 1.6
+    s.text(tx, y + M * PX * 0.9 + M * PX / 2, name, M, color, "start", bold=True, overlap=True)
+    for k, t in enumerate(lines):
+        s.text(tx, card_line_y(y, k, M, SM), t, SM, "ink", "start", bold=True, fit=w - 2 * M * PX * 1.6, overlap=True)
 
 
 # ── 考えてみよう（選択肢3つ）────────────────────────────────────────────────
-OPT_X, OPT_W, OPT_H = 40, 1840, 120
-OPT_Y = [520, 660, 800]
+OPT_X, OPT_W, OPT_H = 40, 1840, (104 if COMPACT else 120)   # compact: 高さ＝文字の 2.2 倍、隙間 16
+OPT_Y = [400, 520, 640] if COMPACT else [520, 660, 800]
 # 2026-10-18 ユーザー指示「読み上げるときはそれでいいけど、表示としては1,2,3でいい」: 語りは「ひとつ目」、画面の札は数字
 OPT_LABELS = ["1", "2", "3"]
 

@@ -173,6 +173,18 @@ pip install -r scripts/requirements.txt
 
 ## 変更履歴
 
+### 0.7.0
+
+スライド型に **compact の型**を足した（`course.yaml` の `slide_style: compact`。既定は従来の classic）。
+
+- 文字を小さくし（ふつうの文字 2.4／2.0、教材ページの行 2.8／2.4）、**箱の寸法を文字から決める**補助を `slide_kit` に足した:
+  `box_h`・`box_w`・`pair_geom`・`text_rows`・`card_h`・`card_w`・`card_line_y`・`top_for`
+- `lesson_rows`・`position_map` と雛形の `position`・`summary_rows`・`exam_row`・選択肢・`card` は、compact のとき寸法を文字から決め、中身の塊の中心を画面の中央に置く
+- 規則は `references/slide-format.md`「2b-2. compact の型」。既存の講座の1ユニットを作業用の写しで作り直して比べ、制作者が承認した
+- インストール先だけを直していた修正（AZ-104 の制作中。2026-10-31〜11-01）をソースに戻した:
+  `slide_kit.reveal` の `strict_order`（画面の枚の reveal が時刻の逆順なら止める）、`hira_narrow.py` の出現ごとの数え、
+  `ocr_mask.py` の文字化けの検出、`slide-reviewer` と `hira_check.py` の GCP プロジェクトの渡し方、初学者役レビューの観点12
+
 ### 0.6.0
 
 講座ごとに写して直していた Hyperframes のスライド型の工程を、プラグインに上げた（直しが片方の講座にしか入らなくなっていた）。
