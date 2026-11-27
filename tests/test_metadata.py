@@ -1,14 +1,13 @@
 import json
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGIN = REPO / "plugins" / "udemy-exam-prep"
 
-# このプラグインのリリース版。marketplace.json の該当エントリと plugin.json の
-# 両方に同じ値が入っていることを検証する（片方だけ上げる事故を落とす）。
-VERSION = "0.8.4"
-# マーケットプレイス自体の版。プラグインを足したら上げる
-MARKETPLACE_VERSION = "0.8.4"
+# 版の数字はテストに書かない（2026-11-27。テストの定数だけ上げ忘れて main で失敗が続いた）。
+# 確かめるのは、marketplace.json の各エントリと各プラグインの plugin.json が同じ版を宣言していること。
+SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 def _load(p):
@@ -23,7 +22,6 @@ def test_marketplace_json_shape():
     assert "udemy-exam-prep" in names
     entry = next(p for p in m["plugins"] if p["name"] == "udemy-exam-prep")
     assert entry["source"] == "./plugins/udemy-exam-prep"
-    assert entry["version"] == VERSION
     assert entry["description"].strip()
     # 全エントリが最低限の形を満たすこと
     for e in m["plugins"]:
@@ -32,19 +30,20 @@ def test_marketplace_json_shape():
 
 
 def test_the_two_manifests_declare_the_same_version():
-    """片方だけ上げる事故を落とす。"""
+    """全プラグインで、marketplace.json のエントリと plugin.json の版が同じ（片方だけ上げる事故を落とす）。"""
     m = _load(REPO / ".claude-plugin" / "marketplace.json")
-    p = _load(PLUGIN / ".claude-plugin" / "plugin.json")
-    assert m["metadata"]["version"] == MARKETPLACE_VERSION
-    entry = next(x for x in m["plugins"] if x["name"] == "udemy-exam-prep")
-    assert entry["version"] == VERSION
-    assert p["version"] == VERSION
+    assert SEMVER.match(m["metadata"]["version"])
+    for e in m["plugins"]:
+        p = _load(REPO / e["source"] / ".claude-plugin" / "plugin.json")
+        assert p["name"] == e["name"]
+        assert SEMVER.match(e["version"]), e["name"]
+        assert p["version"] == e["version"], f'{e["name"]}: marketplace.json {e["version"]} / plugin.json {p["version"]}'
 
 
 def test_plugin_json_shape():
     p = _load(PLUGIN / ".claude-plugin" / "plugin.json")
     assert p["name"] == "udemy-exam-prep"
-    assert p["version"] == VERSION
+    assert SEMVER.match(p["version"])
     assert p["description"].strip()
     assert p["author"]["name"] == "nomhiro"
 

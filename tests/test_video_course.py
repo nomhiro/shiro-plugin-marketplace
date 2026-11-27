@@ -16,9 +16,6 @@ SKILLS = PLUGIN / "skills"
 AGENTS = PLUGIN / "agents"
 SCRIPTS = PLUGIN / "scripts"
 
-VERSION = "0.7.1"
-MARKETPLACE_VERSION = "0.8.4"
-
 EXPECTED_SKILLS = {"make-lecture-movie", "make-practice-movie", "record-practice-screen", "publish-video-course",
                    "make-slide-lecture"}
 EXPECTED_AGENTS = {"transcript-reviewer", "slide-reviewer"}
@@ -73,7 +70,6 @@ def test_marketplace_lists_all_plugins():
     m = _load(REPO / ".claude-plugin" / "marketplace.json")
     names = [p["name"] for p in m["plugins"]]
     assert names == ["udemy-exam-prep", "udemy-video-course", "stop-ai-slop-jp"]
-    assert m["metadata"]["version"] == MARKETPLACE_VERSION
 
 
 def test_plugin_entry_and_manifest_agree():
@@ -81,7 +77,7 @@ def test_plugin_entry_and_manifest_agree():
     entry = next(p for p in m["plugins"] if p["name"] == "udemy-video-course")
     manifest = _load(PLUGIN / ".claude-plugin" / "plugin.json")
     assert entry["source"] == "./plugins/udemy-video-course"
-    assert entry["version"] == manifest["version"] == VERSION
+    assert entry["version"] == manifest["version"]   # 版の数字はテストに書かない（test_metadata.py）
     assert entry["description"].strip() and manifest["description"].strip()
     assert manifest["name"] == "udemy-video-course"
 

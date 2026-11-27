@@ -5,7 +5,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PLUGIN = REPO / "plugins" / "stop-ai-slop-jp"
 SKILL = PLUGIN / "skills" / "stop-ai-slop-jp"
-VERSION = "0.1.1"
 
 
 def _load(p):
@@ -17,7 +16,7 @@ def test_manifests_declare_the_same_version():
     entry = next(x for x in m["plugins"] if x["name"] == "stop-ai-slop-jp")
     p = _load(PLUGIN / ".claude-plugin" / "plugin.json")
     assert entry["source"] == "./plugins/stop-ai-slop-jp"
-    assert entry["version"] == VERSION and p["version"] == VERSION
+    assert entry["version"] == p["version"]   # 版の数字はテストに書かない（test_metadata.py）
     assert p["name"] == "stop-ai-slop-jp"
     assert p["description"].strip()
 
