@@ -173,6 +173,14 @@ pip install -r scripts/requirements.txt
 
 ## 変更履歴
 
+### 0.7.1
+
+compact の型のとき、`agenda_rows`（冒頭の「このレクチャーの流れ」）と `bridge_rows`（区切りの札）も compact の大きさにした。
+0.7.0 では classic の寸法（縦いっぱい・文字 4.0）のままで、AI-200 の講座が部品の側で置き換えていた。
+
+- 行の名前 2.8（`lesson_rows` と同じ）、高さ `box_h`、隙間 20px、幅は最も長い名前から（下限 960px）。塊を画面の中央に置く
+- classic の出力は変えていない（変更の前後で HTML が同じことを確かめた）
+
 ### 0.7.0
 
 スライド型に **compact の型**を足した（`course.yaml` の `slide_style: compact`。既定は従来の classic）。

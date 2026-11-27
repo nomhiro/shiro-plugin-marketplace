@@ -636,42 +636,63 @@ def _agenda_ys(n: int):
     return [AGENDA_Y0 + i * (h + AGENDA_GAP) for i in range(n)], h
 
 
-def _agenda_row(s: "Slide", y, h, name, state):
+def _agenda_geom(s: "Slide", names):
+    """行の y の並び・高さ・左端・幅。classic は従来どおり縦いっぱい・横いっぱい（文字 4.0）。
+    compact は行の名前 2.8（lesson_rows と同じ）で、高さ box_h・隙間 ROW_GAP・幅は最も長い名前から（下限 960）、
+    塊を左右・上下とも画面の中央に置く（2026-11-27。AI-200 の講座で置き換えていたものを上げた）。"""
+    n = len(names)
+    if not COMPACT:
+        ys, h = _agenda_ys(n)
+        return ys, h, 40, 1840, 4.0
+    import math  # noqa: PLC0415
+    size = 2.8
+    h = box_h([size])
+    pad = 1.6 * size * PX
+    w = max(960, math.ceil((max(s.fonts.width(nm, size, 700) for nm in names) + 2 * pad + 120) / 20) * 20)
+    y0 = top_for(n * h + (n - 1) * ROW_GAP)
+    return [y0 + i * (h + ROW_GAP) for i in range(n)], h, (1920 - w) / 2, w, size
+
+
+def _agenda_row(s: "Slide", y, h, name, state, x=40, w=1840, size=4.0):
     """state: "done"（済み：薄い文字＋✓）／"now"（いま：青い面＋青い太字）／"todo"（これから：濃い文字）
     面は半透明なので、まず白い面を敷く（重ねたときに下の文字が透けて二重に見えた。2026-10-08）。"""
-    size = 4.0
-    s.rect(32, y - 5, 1856, h + 10, "wht", 14)   # 下の行の太い縁（いま）がはみ出して残らないよう、少し広く白で覆う（再レビュー[低]）
-    s.rect(40, y, 1840, h, "box-white")
+    tx = x + 70 if not COMPACT else x + 1.6 * size * PX
+    fit = 1600 if not COMPACT else w - 2 * 1.6 * size * PX - 60
+    s.rect(x - 8, y - 5, w + 16, h + 10, "wht", 14)   # 下の行の太い縁（いま）がはみ出して残らないよう、少し広く白で覆う（再レビュー[低]）
+    s.rect(x, y, w, h, "box-white")
     if state == "now":
-        s.rect(40, y, 1840, h, "box-subj")
-        s.text(110, y + h / 2, name, size, "subj", "start", bold=True, fit=1600, overlap=True)
+        s.rect(x, y, w, h, "box-subj")
+        s.text(tx, y + h / 2, name, size, "subj", "start", bold=True, fit=fit, overlap=True)
     else:
-        s.rect(40, y, 1840, h, "box")
-        s.text(110, y + h / 2, name, size, "mute" if state == "done" else "ink", "start", bold=(state != "done"), fit=1600, overlap=True)
+        s.rect(x, y, w, h, "box")
+        s.text(tx, y + h / 2, name, size, "mute" if state == "done" else "ink", "start", bold=(state != "done"), fit=fit, overlap=True)
         if state == "done":
-            s.check(1810, y + h / 2, 40)
+            if COMPACT:
+                s.check(x + w - 1.6 * size * PX, y + h / 2, 34)
+            else:
+                s.check(1810, y + h / 2, 40)
 
 
 def agenda_rows(s: "Slide", names, now_at=None):
     """冒頭の「このレクチャーの流れ」。全部の名前を「これから」で出し、now_at（語末）で1行目を「いま」にする。"""
-    ys, h = _agenda_ys(len(names))
+    ys, h, x, w, size = _agenda_geom(s, names)
     for y, name in zip(ys, names):
-        _agenda_row(s, y, h, name, "todo")
+        _agenda_row(s, y, h, name, "todo", x, w, size)
     if now_at is not None:
         with s.reveal("now", now_at, "1行目を「いま」にする"):
-            _agenda_row(s, ys[0], h, names[0], "now")
+            _agenda_row(s, ys[0], h, names[0], "now", x, w, size)
 
 
 def bridge_rows(s: "Slide", names, nxt: int, at_prev: float, at_next: float):
     """区切りの札。nxt＝次に始まるユニットの番号（1始まり、2以上）。
     始め: 済み（✓）・直前（いま）・これから。「ここまで」の語末で直前を済みに、「次は」の語末で次を「いま」にする。"""
-    ys, h = _agenda_ys(len(names))
+    ys, h, x, w, size = _agenda_geom(s, names)
     for i, (y, name) in enumerate(zip(ys, names), 1):
-        _agenda_row(s, y, h, name, "done" if i < nxt - 1 else ("now" if i == nxt - 1 else "todo"))
+        _agenda_row(s, y, h, name, "done" if i < nxt - 1 else ("now" if i == nxt - 1 else "todo"), x, w, size)
     with s.reveal("prev", at_prev, "「ここまで」の名前の語末（直前を済みに）"):
-        _agenda_row(s, ys[nxt - 2], h, names[nxt - 2], "done")
+        _agenda_row(s, ys[nxt - 2], h, names[nxt - 2], "done", x, w, size)
     with s.reveal("next", at_next, "「次は」の名前の語末（次を「いま」に）"):
-        _agenda_row(s, ys[nxt - 1], h, names[nxt - 1], "now")
+        _agenda_row(s, ys[nxt - 1], h, names[nxt - 1], "now", x, w, size)
 
 
 # ── 現在地（2026-10-09・ユーザー指示「セクション全体のうち何についてのレクチャーか、進捗が分かることが大事」）──────
