@@ -34,6 +34,10 @@ doc_refs:
 # 型の文書（BRIEF に書く）。空ならプラグインの references/slide-format.md
 slide_format_doc: ""
 
+# スライド型の大きさ（references/slide-format.md「2b-2. compact の型」）。新しい講座は compact。
+# 書かなければ classic（従来の大きさ。上げ済みの講座のユニットを作り直しても見た目が変わらない）。講座の途中で変えない
+slide_style: compact
+
 # 描画の道具。講座の途中で版を変えない（描画が変わり、撮り直しになる）
 hyperframes_version: "0.8.149"
 faceless_scripts: ~/.claude/skills/faceless-explainer/scripts

@@ -51,6 +51,11 @@ IMAGE_GLOB = ("*.jpg", "*.jpeg", "*.png")
 # ---------------------------------------------------------------- 規則
 def load_rules(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
+    if "�" in text:
+        # 2026-10-31 AZ-104 L2-2: Windows の az CLI の出力（cp932）を UTF-8 で読んで足した語が化け、一度も当たらずに「0 件」で通った。
+        # 値は表示しない（行番号だけ）
+        rows = [i for i, line in enumerate(text.splitlines(), 1) if "�" in line]
+        raise SystemExit(f"{path}: 文字化け（U+FFFD）を含む行があります: {rows}。規則を足したスクリプトの文字コードを確かめて足し直してください")
     if path.suffix.lower() == ".json":
         rules = json.loads(text)
     else:

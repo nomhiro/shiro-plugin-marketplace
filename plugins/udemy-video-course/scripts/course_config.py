@@ -34,6 +34,7 @@ DEFAULTS: dict = {
     "doc_refs": [],                          # ユニット doc の「参照」に並べる講座の資料（例: research/learning-guide.md）
     "slide_format_doc": "",                  # 型の文書（ユニットの BRIEF に書く）。空ならプラグインの references/slide-format.md
     "hyperframes_version": "0.8.149",        # npx hyperframes@<版>。講座の途中で版を変えない（描画が変わる）
+    "slide_style": "classic",                # スライド型の大きさ。classic＝従来／compact＝文字を小さく、箱を文字から決め、中身を画面の中央に（2026-11-26。slide-format.md「2b-2」）
     "faceless_scripts": "~/.claude/skills/faceless-explainer/scripts",  # assemble-index.mjs・transitions.mjs・audio.mjs
     "tts": {
         "voice": "Callirrhoe",
