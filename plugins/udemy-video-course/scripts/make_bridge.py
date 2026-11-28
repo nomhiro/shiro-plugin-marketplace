@@ -55,8 +55,8 @@ import sys
 from pathlib import Path
 
 UNIT = Path(__file__).resolve().parent
-from slide_kit import Slide, load_durations, Beats, bridge_rows  # noqa: E402
-
+{parts_block}from slide_kit import Slide, load_durations, Beats, bridge_rows  # noqa: E402
+{domain_block}
 D = load_durations(UNIT)
 E = Beats(UNIT)
 OUT = UNIT / "compositions" / "frames"
@@ -80,6 +80,35 @@ def frame1():
 if __name__ == "__main__":
     frame1()
 '''
+
+
+def parts_blocks(lec: str) -> tuple[str, str]:
+    """講座の部品（course.yaml の parts_dir の `*_parts.py`）を読み込む行を作る（0.7.2）。
+
+    部品は import した時点で Slide に講座の枠（上部の帯・タイトル）を差し込む。読み込まないと、
+    区切りの札だけ帯もタイトルも無い画面になる（AI-200 の L0-1 で手で2行足した）。
+    unit_build.py が parts_dir を PYTHONPATH に入れるので、ここではモジュール名だけを書く。
+    部品に `set_domain` があれば、同じレクチャーの冒頭（lecture-<lec>-open/slides.py）の呼び出しを写す（無ければ None）。
+    部品が無い・2つ以上ある講座では何も足さない（従来どおり slide_kit だけで描く）。
+    """
+    parts_dir = COURSE.root / str(COURSE.data.get("parts_dir") or "videos/_shared")
+    mods = sorted(parts_dir.glob("*_parts.py")) if parts_dir.is_dir() else []
+    if len(mods) != 1:
+        if len(mods) > 1:
+            print(f"注意: {parts_dir} に *_parts.py が {len(mods)} 個ある。slides.py に部品の import を足さない（手で足す）")
+        return "", ""
+    mod = mods[0].stem
+    parts = f"import {mod}  # noqa: E402,F401  講座の部品。import で Slide に講座の枠（上部の帯・タイトル）を差し込む\n"
+    if "def set_domain" not in mods[0].read_text(encoding="utf-8", errors="replace"):
+        return parts, ""
+    call = "set_domain(None)"
+    opener = VIDEOS / f"lecture-{lec}-open" / "slides.py"
+    if opener.is_file():
+        for ln in opener.read_text(encoding="utf-8", errors="replace").splitlines():
+            if ln.strip().startswith("set_domain("):
+                call = ln.split("#")[0].strip()
+                break
+    return parts, f"\n{mod}.{call}  # 章の領域（同じレクチャーの冒頭と同じ値にする）\n"
 
 
 def main(argv: list[str]) -> int:
@@ -129,9 +158,11 @@ def main(argv: list[str]) -> int:
         f"## Frame 1 — 区切り\n\n- scene: 区切り（{prev} → {nxt}）\n- voiceover: \"{line}\"\n- duration: 8s\n"
         "- transition_in: cut\n- status: built\n- src: compositions/frames/01-bridge.html\n- type: overview\n",
         encoding="utf-8", newline="\n")
+    parts_block, domain_block = parts_blocks(lec)
     # 台本の綴りを STT が返す綴りの初期値にする（違えば KeyError で語の一覧が出る）
     (unit / "slides.py").write_text(
-        SLIDES_PY.format(lec=lec, n=n, prev=prev, nxt=nxt, names=names, phrase_prev=prev, phrase_next=nxt),
+        SLIDES_PY.format(lec=lec, n=n, prev=prev, nxt=nxt, names=names, phrase_prev=prev, phrase_next=nxt,
+                         parts_block=parts_block, domain_block=domain_block),
         encoding="utf-8", newline="\n")
     (unit / "compositions" / "frames").mkdir(parents=True)
 

@@ -39,6 +39,14 @@ Gemini-TTS は**漢字をそのまま読む**（実測 5.26字/秒・56行）。
 
 話者・モデル・指示書・読みの辞書の場所は `course.yaml` の tts（course_config.py）。
 作った直後に `<audio_backup_dir>/<日付>/<unit>/after-tts/` へ `assets/voice` と `audio_meta.json` を写す（`--no-backup` で止める）。
+
+## 止まったまま戻らないことへの対処（0.7.2）
+
+AI-200 の制作（2026-11-28）で2回、wav と退避を書き終えたあとプロセスが終わらず約30分止まった。
+gRPC のクライアントがインタープリターの終了時に戻らないものと見ている（Windows。原因は未確定）。そこで:
+
+- 1回の合成に `--timeout`（既定 180 秒）を付ける。超えたら、その行で止めて、それまでに作った行を audio_meta.json に書き、退避してから終わる
+- 終わる前にクライアントの接続を閉じ、出力を流しきってから `os._exit` で抜ける（書き込みはすべて済んでいる）
 """
 
 from __future__ import annotations
@@ -68,6 +76,7 @@ DEFAULT_VOICE = COURSE.tts("voice")
 SAMPLE_RATE = 24000
 CHUNK_MAX_CHARS = 250
 CHUNK_GAP_SECONDS = 0.5
+REQUEST_TIMEOUT_SECONDS = 180.0   # 1回の合成の上限（0.7.2。超えたらその行で止める）
 # 行の末尾に足す無音。**「図を見る時間を渡す」をここで決定的に作る。**
 # 演技指示（prompt）は当たり外れがあるので間の管理には使わない（下の注記）。
 LINE_TAIL_SECONDS = 0.35
@@ -226,7 +235,8 @@ def strip_wav_header(blob: bytes) -> bytes:
 
 
 def synthesize(
-    client, text: str, style: str, voice: str, model: str, tail: float = LINE_TAIL_SECONDS
+    client, text: str, style: str, voice: str, model: str, tail: float = LINE_TAIL_SECONDS,
+    timeout: float = REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[bytes, bool]:
     """1行を (PCM, スタイル指示なしへ縮退したか) で返す。
 
@@ -244,6 +254,7 @@ def synthesize(
             audio_config=texttospeech.AudioConfig(
                 audio_encoding=texttospeech.AudioEncoding.LINEAR16
             ),
+            timeout=timeout,
         )
         # ★ ヘッダを剥がす。これを忘れると連結点がクリックノイズになる
         return strip_wav_header(resp.audio_content)
@@ -315,6 +326,8 @@ def main(argv: list[str]) -> int:
     )
     ap.add_argument("--readings", default=None, help="読みの辞書（既定: course.yaml の tts.readings。無ければ置き換えない）")
     ap.add_argument("--no-backup", action="store_true", help="作った直後の退避をしない")
+    ap.add_argument("--timeout", type=float, default=REQUEST_TIMEOUT_SECONDS,
+                    help=f"1回の合成の上限秒数（既定 {REQUEST_TIMEOUT_SECONDS:g}）。超えたらその行で止める")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv[1:])
 
@@ -377,7 +390,14 @@ def main(argv: list[str]) -> int:
     made: list[str] = []
     total = 0.0
     degraded: list[int] = []
+    failed: tuple[int, str] | None = None
     for frame in sorted(spoken):
+        if failed:
+            # 止まった行より後ろは、前の版があれば据え置く（audio_meta.json を食い違わせない）
+            if prev.get(frame) and (project / f"assets/voice/{frame:02d}.wav").is_file():
+                voices.append(prev[frame])
+                total += float(prev[frame].get("duration_s") or 0)
+            continue
         rel = f"assets/voice/{frame:02d}.wav"
         out = project / rel
         text = spoken[frame]
@@ -388,7 +408,14 @@ def main(argv: list[str]) -> int:
                 total += float(entry.get("duration_s") or 0)
                 print(f"  frame {frame:>2}: 据え置き {entry.get('duration_s')}s")
                 continue
-        pcm, fell_back = synthesize(client, text, style, voice, a.model, a.tail)
+        try:
+            pcm, fell_back = synthesize(client, text, style, voice, a.model, a.tail, a.timeout)
+        except Exception as e:  # noqa: BLE001  時間切れ・API の失敗。作った行を失わないよう、書いて退避してから止める
+            failed = (frame, f"{type(e).__name__}: {e}")
+            if prev.get(frame) and out.is_file():
+                voices.append(prev[frame])
+                total += float(prev[frame].get("duration_s") or 0)
+            continue
         dur = round(write_wav(out, pcm), 3)
         total += dur
         voices.append({"frame": frame, "path": rel, "duration_s": dur, "words": []})
@@ -406,6 +433,14 @@ def main(argv: list[str]) -> int:
     if made and not a.no_backup:
         dest = backup(project, made, meta_path)
         print(f"退避: {dest}（{len(made)} 本と audio_meta.json）")
+    try:
+        client.transport.close()   # gRPC の接続を閉じる（終了時に戻らないことへの対処。0.7.2）
+    except Exception:  # noqa: BLE001
+        pass
+    if failed:
+        print(f"FAIL: frame {failed[0]} の合成で止めた（{failed[1]}）。"
+              f"作り直すのは `--only {failed[0]}` から（それより後ろの行も、まだなら足す）")
+        return 1
     if degraded:
         print(
             f"★ frame {degraded} は content filter の誤検知でスタイル指示が乗っていません。\n"
@@ -417,5 +452,21 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def _exit_now(code: int) -> None:
+    """出力を流しきってから、後片付けを待たずに抜ける（0.7.2）。
+
+    wav・audio_meta.json・退避はすべて main の中で書き終えている。gRPC のクライアントが終了時に戻らず
+    約30分止まったことが2回あった（AI-200・2026-11-28・Windows）ので、atexit の後片付けを待たない。
+    """
+    import os
+
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.flush()
+        except Exception:  # noqa: BLE001
+            pass
+    os._exit(code)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    _exit_now(main(sys.argv))

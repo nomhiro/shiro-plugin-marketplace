@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from hira_check import MODEL, run  # noqa: E402
+from hira_check import MODEL, REQUEST_TIMEOUT_SECONDS, exit_now, make_client, run  # noqa: E402
 
 
 def count_readings(texts: list[str], words: list[str]) -> dict[str, int]:
@@ -55,12 +55,18 @@ def main() -> int:
     ap.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))
     ap.add_argument("--location", default=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"))
     ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--timeout", type=float, default=REQUEST_TIMEOUT_SECONDS, help="1回の呼び出しの上限秒数")
     a = ap.parse_args()
     if not a.project:
         print("--project か GOOGLE_CLOUD_PROJECT を指定してください", file=sys.stderr)
         return 2
-    from google import genai
-    client = genai.Client(vertexai=True, project=a.project, location=a.location)
+    client = make_client(a.project, a.location, a.timeout)
+    code = judge(client, a)
+    exit_now(client, code)   # 0.7.2: 終了時に戻らないことへの対処（hira_check.py の冒頭）
+    return code
+
+
+def judge(client, a) -> int:
     rows = run(client, a.model, a.wav, win=3.0, stride=1.5)
     words = [a.good] + a.bads
     for t0, t1, tag, r in rows:
