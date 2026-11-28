@@ -173,6 +173,19 @@ pip install -r scripts/requirements.txt
 
 ## 変更履歴
 
+### 0.7.2
+
+AI-200 の L0-1 の制作（2026-11-28）で見つかった3点を直した。
+
+- `make_bridge.py`: 区切りの札の `slides.py` が講座の部品（`course.yaml` の parts_dir の `*_parts.py`）を読み込まず、
+  帯とタイトルの無い画面になっていた。部品が1つだけあれば import する行を足し、部品に `set_domain` があれば
+  同じレクチャーの冒頭（`lecture-<lec>-open/slides.py`）と同じ呼び出しを写す（無ければ `None`）
+- `slide-format.md` §2d・`quiz-authoring.md`: 試験・講座の案内の回（第0章など）には考えてみようを置かない。
+  小テストも作らないと提案してよい（制作者の指示。理由は PLAN に残す）
+- `tts.py`・`hira_check.py`・`hira_narrow.py`: 書き終えたあとプロセスが戻らず約30分止まったことが2回あった（Windows。原因は未確定）。
+  1回の呼び出しに上限（`--timeout`。TTS 180 秒・Gemini 60 秒）を付け、終わる前にクライアントを閉じて `os._exit` で抜ける。
+  TTS が途中の行で失敗したら、それまでに作った行を `audio_meta.json` に書いて退避してから止める
+
 ### 0.7.1
 
 compact の型のとき、`agenda_rows`（冒頭の「このレクチャーの流れ」）と `bridge_rows`（区切りの札）も compact の大きさにした。

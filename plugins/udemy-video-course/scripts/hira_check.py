@@ -18,6 +18,10 @@
   プロジェクトは --project か環境変数 GOOGLE_CLOUD_PROJECT。値は `gcloud config get-value project` で取る。全窓 ERR はプロジェクトか認証の誤り）。
 
 終了コード: 0＝書き起こした／2＝引数・認証の不足。誤読かどうかの判定はしない（人が読む）。
+
+止まったまま戻らないことへの対処（0.7.2）: AI-200 の制作（2026-11-28）で、書き起こしを出し終えたあと（または途中で）
+プロセスが戻らないことがあった。1回の呼び出しに上限（`--timeout`、既定 60 秒）を付け、超えた窓は再試行のあと `ERR(時間切れ…)` と出す。
+終わる前にクライアントを閉じ、出力を流しきってから `os._exit` で抜ける（`hira_narrow.py` も同じ）。原因は未確定。
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 MODEL = "gemini-2.5-flash"
+REQUEST_TIMEOUT_SECONDS = 60.0   # 1回の呼び出しの上限（0.7.2）
 P1 = ("この音声は日本語の文章です。聞こえたとおりに、ひらがなだけで書き起こしてください。"
       "意味を推測して補正せず、実際に発音された音をそのまま書いてください。出力は書き起こし1行だけ。")
 P2 = ("次の音声を、聞こえた音のとおりにひらがなだけで文字に起こしてください。意味を考えて直さないこと。"
@@ -65,8 +70,31 @@ def wav_bytes(pcm: bytes, rate: int, ch: int, width: int) -> bytes:
     return b.getvalue()
 
 
+def make_client(project: str, location: str, timeout: float = REQUEST_TIMEOUT_SECONDS):
+    """Vertex AI の Gemini のクライアント。1回の呼び出しに上限を付ける（HttpOptions.timeout はミリ秒）。"""
+    from google import genai
+    from google.genai import types
+    return genai.Client(vertexai=True, project=project, location=location,
+                        http_options=types.HttpOptions(timeout=int(timeout * 1000)))
+
+
+def exit_now(client, code: int) -> None:
+    """クライアントを閉じ、出力を流しきってから、後片付けを待たずに抜ける（0.7.2。書き込むファイルは無い）。"""
+    try:
+        client.close()
+    except Exception:  # noqa: BLE001
+        pass
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.flush()
+        except Exception:  # noqa: BLE001
+            pass
+    os._exit(code)
+
+
 def listen(client, model: str, data: bytes, prompt: str) -> str:
     from google.genai import types
+    last = ""
     for k in range(4):
         try:
             r = client.models.generate_content(
@@ -74,9 +102,10 @@ def listen(client, model: str, data: bytes, prompt: str) -> str:
                 contents=[types.Part.from_bytes(data=data, mime_type="audio/wav"), prompt],
                 config=types.GenerateContentConfig(temperature=0.0))
             return (r.text or "").strip()
-        except Exception:      # 一時的な失敗は少し待って再試行する
+        except Exception as e:      # 一時的な失敗・時間切れは少し待って再試行する
+            last = type(e).__name__
             time.sleep(2 + 2 * k)
-    return "ERR"
+    return f"ERR({last})" if last else "ERR"
 
 
 def run(client, model: str, path: Path, win: float = 9.0, stride: float = 7.0):
@@ -107,12 +136,12 @@ def main() -> int:
     ap.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))
     ap.add_argument("--location", default=os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1"))
     ap.add_argument("--model", default=MODEL)
+    ap.add_argument("--timeout", type=float, default=REQUEST_TIMEOUT_SECONDS, help="1回の呼び出しの上限秒数")
     a = ap.parse_args()
     if not a.project:
         print("--project か GOOGLE_CLOUD_PROJECT を指定してください", file=sys.stderr)
         return 2
-    from google import genai
-    client = genai.Client(vertexai=True, project=a.project, location=a.location)
+    client = make_client(a.project, a.location, a.timeout)
     pat = re.compile(a.pattern) if a.pattern else None
     for w in a.wavs:
         print(f"=== {w.name}", flush=True)
@@ -122,6 +151,7 @@ def main() -> int:
                 hits = pat.findall(r)
                 mark = f"   <- {hits}" if hits else ""
             print(f"  {t0:5.1f}-{t1:5.1f} {tag}: {r}{mark}", flush=True)
+    exit_now(client, 0)
     return 0
 
 
